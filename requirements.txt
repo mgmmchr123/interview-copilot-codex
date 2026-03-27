@@ -1,0 +1,7 @@
+python-dotenv>=1.0.0
+requests>=2.31.0
+sounddevice>=0.4.6
+websocket-client>=1.8.0
+openai
+Pillow
+opencv-python
