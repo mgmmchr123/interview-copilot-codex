@@ -103,6 +103,10 @@ class DeepgramProvider(SttProvider):
             ("utterance_end_ms", "1000"),
             ("vad_events", "true"),
         ]
+        keyterms = self.config.keywords
+        if keyterms:
+            for keyterm in keyterms:
+                query_params.append(("keyterm", keyterm))
         return f"{self.websocket_url}?{urlencode(query_params, doseq=True)}"
 
     def _on_open(self, ws: WebSocketApp) -> None:
@@ -119,15 +123,20 @@ class DeepgramProvider(SttProvider):
             if not transcript:
                 return
 
-            self._buffered_text = transcript
+            is_final = bool(payload.get("is_final", False))
+            speech_final = bool(payload.get("speech_final", False))
 
-            if bool(payload.get("speech_final", False)):
+            if speech_final:
                 self._emit("final_update", text=transcript, is_final=True, raw=payload)
                 self._buffered_text = ""
                 return
 
-            if not bool(payload.get("is_final", False)):
+            if is_final:
+                self._buffered_text = (self._buffered_text + " " + transcript).strip()
+                self._emit("final_update", text=transcript, is_final=True, raw=payload)
+            else:
                 self._emit("partial_update", text=transcript, is_final=False, raw=payload)
+                self._buffered_text = transcript
             return
 
         if message_type == "UtteranceEnd":

@@ -21,6 +21,19 @@ ASSEMBLYAI_MODEL = "nano"
 ASSEMBLYAI_ENABLE_KEYTERMS = True
 ASSEMBLYAI_KEYTERMS: list[str] = []
 DEEPGRAM_MODEL = "nova-3"
+DEEPGRAM_KEYWORDS: list[str] = [
+    "typecasting", "instanceof", "ClassCastException",
+    "microservices", "Kafka", "Spring Boot", "RabbitMQ",
+    "PostgreSQL", "Oracle", "ElasticSearch", "MongoDB",
+    "Docker", "Kubernetes", "AWS", "EC2", "RDS", "S3",
+    "REST", "gRPC", "OAuth", "JWT",
+    "multithreading", "concurrency", "deadlock", "race condition",
+    "heap", "stack", "garbage collection", "JVM",
+    "Big O", "binary search", "hashmap", "linked list", "recursion",
+    "throughput", "latency", "idempotent", "eventual consistency",
+    "sharding", "partitioning", "replication", "load balancer",
+    "circuit breaker", "retry logic", "backpressure", "oop"
+]
 DEEPGRAM_BALANCE_WARNING_THRESHOLD = 1.0
 STT_SAMPLE_RATE = 16000
 STT_CHANNELS = 1
@@ -29,14 +42,12 @@ CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
 CAMERA_CROP = float(os.getenv("CAMERA_CROP", "0.8"))
 CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "1920"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "1080"))
-RESUME_CONTEXT = """
-Name: [Your Name]
-Current Role: [Your Role]
-Years of Experience: [X]
-Recent Project: [Brief description]
-Tech Stack: [Your main skills]
-Education: [Your education]
-""".strip()
+RESUME_CONTEXT = (
+    "- 7+ years backend engineer\n"
+    "- Java, Spring Boot, Kafka\n"
+    "- Built trading / regulatory systems\n"
+    "- Focus on high throughput, reliability\n"
+)
 
 
 @dataclass(slots=True)
@@ -54,6 +65,7 @@ class AppConfig:
     deepgram_api_key: str
     deepgram_model: str
     deepgram_balance_warning_threshold: float
+    deepgram_keywords: list[str]
     stt_sample_rate: int
     stt_channels: int
     stt_language: str
@@ -97,6 +109,9 @@ class AppConfig:
                     "DEEPGRAM_BALANCE_WARNING_THRESHOLD",
                     str(DEEPGRAM_BALANCE_WARNING_THRESHOLD),
                 )
+            ),
+            deepgram_keywords=_parse_list(
+                os.getenv("DEEPGRAM_KEYWORDS", json.dumps(DEEPGRAM_KEYWORDS))
             ),
             stt_sample_rate=int(os.getenv("STT_SAMPLE_RATE", str(STT_SAMPLE_RATE))),
             stt_channels=int(os.getenv("STT_CHANNELS", str(STT_CHANNELS))),

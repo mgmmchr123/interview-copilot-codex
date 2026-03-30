@@ -31,13 +31,15 @@ class LlmClient:
     def stream_answer(
         self,
         prompt: str,
+        system: str = "",
         history: list[dict] | None = None,
         images_b64: list[str] | None = None,
+        model: str | None = None,
     ) -> Iterator[str]:
         if self.provider == "openai":
-            yield from self._stream_openai(prompt, history, images_b64)
+            yield from self._stream_openai(prompt, system, history, images_b64, model)
             return
-        yield from self._stream_ollama(prompt)
+        yield from self._stream_ollama(f"{system}\n\n{prompt}" if system else prompt)
 
     def _stream_ollama(self, prompt: str) -> Iterator[str]:
         self._stream_started_at = perf_counter()
@@ -94,19 +96,25 @@ class LlmClient:
     def _stream_openai(
         self,
         prompt: str,
+        system: str = "",
         history: list[dict] | None = None,
         images_b64: list[str] | None = None,
+        model: str | None = None,
     ) -> Iterator[str]:
         import openai
 
+        selected_model = model or self.config.openai_model
         self._stream_started_at = perf_counter()
         self._debug_log(
             "request_start",
-            f"prompt_chars={len(prompt)} model={self.config.openai_model}",
+            f"prompt_chars={len(prompt)} model={selected_model}",
         )
 
         client = openai.OpenAI(api_key=self.config.openai_api_key)
-        messages = list(history or [])
+        messages: list[dict[str, object]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.extend(history or [])
 
         if images_b64:
             user_content_items: list[dict[str, object]] = []
@@ -129,7 +137,7 @@ class LlmClient:
 
         try:
             stream = client.chat.completions.create(
-                model=self.config.openai_model,
+                model=selected_model,
                 messages=messages,
                 stream=True,
                 max_tokens=400,

@@ -4,6 +4,7 @@ import logging
 import os
 import queue
 import tkinter as tk
+from datetime import datetime
 from threading import Thread
 from time import perf_counter
 from tkinter import messagebox, scrolledtext
@@ -223,8 +224,10 @@ class CopilotWindow:
         self.prompt_frame = tk.Frame(self.container)
         self.output_frame = tk.Frame(self.container)
         self.footer_frame = tk.Frame(self.container)
-        self.button_row = tk.Frame(self.footer_frame)
+        self.button_row_top = tk.Frame(self.footer_frame)
+        self.button_row_bottom = tk.Frame(self.footer_frame)
         self._has_streamed_content = False
+        self._user_at_bottom = True
         self.prompt_input = scrolledtext.ScrolledText(
             self.prompt_frame,
             wrap=tk.WORD,
@@ -238,42 +241,54 @@ class CopilotWindow:
             font=(UI_FONT_FAMILY, UI_FONT_SIZE),
             height=6,
         )
+        self._output_scrollbar_set = self.output.vbar.set
+        self.output.configure(yscrollcommand=self._on_output_scroll)
         self.stop_answer_button = tk.Button(
-            self.button_row,
+            self.button_row_top,
             text="Answer",
             command=self._on_answer_click,
-            width=10,
+            width=8,
             font=(UI_FONT_FAMILY, 9),
-            padx=3,
-            pady=1,
+            padx=6,
+            pady=3,
             state=tk.DISABLED,
         )
         self.listen_button = tk.Button(
-            self.button_row,
+            self.button_row_top,
             text="Listen",
             command=self._on_listen_click,
-            width=10,
+            width=8,
             font=(UI_FONT_FAMILY, 9),
-            padx=3,
-            pady=1,
+            padx=6,
+            pady=3,
+        )
+        self.follow_up_button = tk.Button(
+            self.button_row_top,
+            text="Follow-up",
+            command=self._on_follow_up_click,
+            width=8,
+            font=(UI_FONT_FAMILY, 9),
+            padx=6,
+            pady=3,
+            state=tk.DISABLED,
         )
         self.screenshot_button = tk.Button(
-            self.button_row,
+            self.button_row_bottom,
             text="Camera",
             command=self._on_screenshot_click,
-            width=9,
+            width=8,
             font=(UI_FONT_FAMILY, 9),
-            padx=3,
-            pady=1,
+            padx=6,
+            pady=3,
         )
         self.new_topic_button = tk.Button(
-            self.button_row,
+            self.button_row_bottom,
             text="Clear",
             command=self._on_new_topic_click,
             width=8,
             font=(UI_FONT_FAMILY, 9),
-            padx=3,
-            pady=1,
+            padx=6,
+            pady=3,
         )
 
         self.stt_controller.set_event_callback(self._on_stt_event)
@@ -299,11 +314,13 @@ class CopilotWindow:
 
         self.prompt_input.pack(fill=tk.X)
         self.output.pack(fill=tk.BOTH, expand=True)
-        self.button_row.pack(fill=tk.X)
-        self.listen_button.pack(side=tk.LEFT, padx=(8, 0))
-        self.stop_answer_button.pack(side=tk.LEFT, padx=(8, 0))
-        self.screenshot_button.pack(side=tk.LEFT, padx=(8, 0))
-        self.new_topic_button.pack(side=tk.LEFT, padx=(8, 0))
+        self.button_row_top.pack(anchor="center")
+        self.button_row_bottom.pack(anchor="center", pady=(6, 0))
+        self.listen_button.pack(side=tk.LEFT, padx=4)
+        self.stop_answer_button.pack(side=tk.LEFT, padx=4)
+        self.follow_up_button.pack(side=tk.LEFT, padx=4)
+        self.screenshot_button.pack(side=tk.LEFT, padx=4)
+        self.new_topic_button.pack(side=tk.LEFT, padx=4)
         self.prompt_input.insert("1.0", self.orchestrator.default_prompt)
         self._replace_output("Ready")
         self.output.see("1.0")
@@ -347,6 +364,11 @@ class CopilotWindow:
 
         self._clear_all_captured_images()
         self._clear_transcript()
+        logger.info(
+            "Transcript-to-LLM handoff timestamp: %s (chars=%d)",
+            datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3],
+            len(prompt),
+        )
         self._start_llm_request(prompt, images_b64=images_b64)
 
     def _on_screenshot_click(self) -> None:
@@ -370,6 +392,8 @@ class CopilotWindow:
     def _on_new_topic_click(self) -> None:
         self._clear_transcript()
         self._clear_all_captured_images()
+        self.orchestrator.clear_history()
+        self._update_controls()
 
     def _stop_stt_session(self) -> None:
         try:
@@ -382,7 +406,38 @@ class CopilotWindow:
             return
         self._stop_and_ask()
 
-    def _start_llm_request(self, prompt: str, images_b64: list[str] | None = None) -> None:
+    def _on_follow_up_click(self) -> None:
+        if self._llm_state == "generating":
+            return
+        prompt = self._current_prompt_text()
+        images_b64 = list(self.captured_images_b64)
+
+        if self._stt_state == "listening":
+            self.recorder.stop()
+            self._stt_state = "idle"
+            self._update_controls()
+            Thread(target=self._stop_stt_session, daemon=True).start()
+
+        if not prompt and not images_b64:
+            self._replace_output("No question sent.")
+            self.output.see("1.0")
+            return
+
+        self._clear_all_captured_images()
+        self._clear_transcript()
+        logger.info(
+            "Transcript-to-LLM handoff timestamp: %s (chars=%d)",
+            datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3],
+            len(prompt),
+        )
+        self._start_llm_request(prompt, images_b64=images_b64, force_follow_up=True)
+
+    def _start_llm_request(
+        self,
+        prompt: str,
+        images_b64: list[str] | None = None,
+        force_follow_up: bool = False,
+    ) -> None:
         request_id = self._start_new_request()
         mode = self.orchestrator.default_mode
         attached_images_b64 = images_b64 if images_b64 is not None else list(self.captured_images_b64)
@@ -390,6 +445,7 @@ class CopilotWindow:
         self.orchestrator.request_answer(
             prompt=prompt,
             mode=mode,
+            force_qtype="follow_up" if force_follow_up else None,
             images_b64=attached_images_b64,
             on_chunk=lambda text, rid=request_id: self._enqueue("chunk", rid, text),
             on_complete=lambda rid=request_id: self._enqueue("complete", rid, ""),
@@ -403,9 +459,15 @@ class CopilotWindow:
         self._llm_state = "generating"
         self._request_started_at = perf_counter()
         self._has_streamed_content = False
+        self._user_at_bottom = True
+        logger.info(
+            "LLM request start timestamp: %s (request_id=%s)",
+            datetime.now().isoformat(timespec="milliseconds"),
+            request_id,
+        )
         self._update_controls()
         self._replace_output("Thinking...")
-        self.output.see("1.0")
+        self.output.yview_moveto(0.0)
         return request_id
 
     def _parse_window_size(self, geometry: str) -> tuple[int, int]:
@@ -504,6 +566,11 @@ class CopilotWindow:
             if kind == "chunk":
                 self._debug_log("render_chunk", f"request_id={request_id} chars={len(payload)}")
                 if not self._has_streamed_content:
+                    logger.info(
+                        "LLM first-token UI timestamp: %s (request_id=%s)",
+                        datetime.now().isoformat(timespec="milliseconds"),
+                        request_id,
+                    )
                     self._replace_output("")
                 self._append_output(payload)
                 self._has_streamed_content = True
@@ -533,32 +600,34 @@ class CopilotWindow:
             self._render_all_thumbnails()
 
     def _append_output(self, text: str) -> None:
-        at_bottom = self._is_scrolled_to_bottom(self.output)
         self.output.config(state=tk.NORMAL)
         self.output.insert(tk.END, text)
-        if at_bottom or not self._has_streamed_content:
+        if self._user_at_bottom:
             self.output.see(tk.END)
         self.output.config(state=tk.DISABLED)
 
-    def _is_scrolled_to_bottom(self, widget: scrolledtext.ScrolledText) -> bool:
-        bottom = widget.yview()[1]
-        return bottom >= 0.99
+    def _on_output_scroll(self, first: str, last: str) -> None:
+        self._output_scrollbar_set(first, last)
+        try:
+            self._user_at_bottom = float(last) >= 0.99
+        except ValueError:
+            self._user_at_bottom = True
 
     def _update_controls(self) -> None:
-        has_content = bool(self._current_prompt_text() or self.captured_images_b64)
-
         if self._llm_state == "generating":
             self.listen_button.config(state=tk.NORMAL)
             self.stop_answer_button.config(state=tk.DISABLED)
-        elif self._stt_state == "listening":
-            self.listen_button.config(state=tk.DISABLED)
-            self.stop_answer_button.config(state=tk.NORMAL)
+            self.follow_up_button.config(state=tk.DISABLED)
         elif self._stt_state == "starting":
             self.listen_button.config(state=tk.DISABLED)
             self.stop_answer_button.config(state=tk.DISABLED)
+            self.follow_up_button.config(state=tk.DISABLED)
         else:
-            self.listen_button.config(state=tk.NORMAL)
-            self.stop_answer_button.config(state=tk.NORMAL if has_content else tk.DISABLED)
+            self.listen_button.config(
+                state=tk.DISABLED if self._stt_state == "listening" else tk.NORMAL
+            )
+            self.stop_answer_button.config(state=tk.NORMAL)
+            self.follow_up_button.config(state=tk.NORMAL)
 
         self.screenshot_button.config(
             state=tk.DISABLED if len(self.captured_images_b64) >= MAX_IMAGES else tk.NORMAL

@@ -30,6 +30,7 @@ class SttConfig:
     language: str
     enable_keyterms: bool = False
     keyterms: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
 
 
 def now_ms() -> int:

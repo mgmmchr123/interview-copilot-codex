@@ -1,4 +1,6 @@
+import argparse
 import logging
+import os
 from threading import Thread
 
 from config import AppConfig
@@ -16,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--resume",
+        default="default",
+        help="Resume name to load from resumes/ directory (without .json)",
+    )
+    args = parser.parse_args()
     config = AppConfig.from_env()
     check_deepgram_balance(
         api_key=config.deepgram_api_key,
@@ -25,7 +34,11 @@ def main() -> None:
     Thread(target=camera_manager.warmup, daemon=True).start()
     llm_client = LlmClient(config=config)
     orchestrator = InterviewOrchestrator(llm_client=llm_client)
-    orchestrator.resume_context = config.resume_context
+    resume_path = f"resumes/{args.resume}.json"
+    if os.path.exists(resume_path):
+        orchestrator.load_resume(resume_path)
+    else:
+        logger.warning("Resume file not found: %s", resume_path)
     stt_controller = SttController(config=config)
     recorder = AudioRecorder(
         on_audio_chunk=stt_controller.send_audio,

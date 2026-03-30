@@ -46,6 +46,7 @@ def create_stt_provider(app_config: AppConfig) -> SttProvider:
                 sample_rate=app_config.stt_sample_rate,
                 channels=app_config.stt_channels,
                 language=app_config.stt_language,
+                keywords=app_config.deepgram_keywords,
             )
         )
 
