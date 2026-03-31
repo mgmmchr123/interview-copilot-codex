@@ -206,6 +206,9 @@ class CopilotWindow:
         self._stt_state = "idle"
         self._llm_state = "idle"
         self._latest_transcript_text = ""
+        self.in_coding_session = False
+        self._pre_request_output_text = ""
+        self._pre_request_was_coding_session = False
         self.captured_images_b64: list[str] = []
         self.captured_image_paths: list[str] = []
         self._captured_thumbnail_photos: list[ImageTk.PhotoImage] = []
@@ -226,8 +229,12 @@ class CopilotWindow:
         self.footer_frame = tk.Frame(self.container)
         self.button_row_top = tk.Frame(self.footer_frame)
         self.button_row_bottom = tk.Frame(self.footer_frame)
+        self.mode_frame = tk.Frame(self.button_row_bottom)
         self._has_streamed_content = False
         self._user_at_bottom = True
+        self._last_chunk_request_id: int | None = None
+        self._last_chunk_payload = ""
+        self.answer_mode_var = tk.StringVar(value="Standard")
         self.prompt_input = scrolledtext.ScrolledText(
             self.prompt_frame,
             wrap=tk.WORD,
@@ -261,6 +268,22 @@ class CopilotWindow:
             font=(UI_FONT_FAMILY, 9),
             padx=6,
             pady=3,
+        )
+        self.mode_label = tk.Label(
+            self.mode_frame,
+            text="Mode",
+            font=(UI_FONT_FAMILY, 9),
+        )
+        self.answer_mode = tk.OptionMenu(
+            self.mode_frame,
+            self.answer_mode_var,
+            "Standard",
+            "Senior (Trade-offs + Failure modes)",
+            "Grounded Senior (FINRA-grounded, defend-ready)",
+        )
+        self.answer_mode.config(
+            width=8,
+            font=(UI_FONT_FAMILY, 9),
         )
         self.follow_up_button = tk.Button(
             self.button_row_top,
@@ -321,6 +344,9 @@ class CopilotWindow:
         self.follow_up_button.pack(side=tk.LEFT, padx=4)
         self.screenshot_button.pack(side=tk.LEFT, padx=4)
         self.new_topic_button.pack(side=tk.LEFT, padx=4)
+        self.mode_frame.pack(side=tk.LEFT, padx=4)
+        self.mode_label.pack(side=tk.LEFT, padx=(0, 4))
+        self.answer_mode.pack(side=tk.LEFT)
         self.prompt_input.insert("1.0", self.orchestrator.default_prompt)
         self._replace_output("Ready")
         self.output.see("1.0")
@@ -392,7 +418,12 @@ class CopilotWindow:
     def _on_new_topic_click(self) -> None:
         self._clear_transcript()
         self._clear_all_captured_images()
+        self.in_coding_session = False
+        self._pre_request_output_text = ""
+        self._pre_request_was_coding_session = False
         self.orchestrator.clear_history()
+        self._replace_output("Ready")
+        self.output.see("1.0")
         self._update_controls()
 
     def _stop_stt_session(self) -> None:
@@ -450,6 +481,13 @@ class CopilotWindow:
             prompt=prompt,
             mode=mode,
             images_b64=attached_images_b64,
+            answer_mode=(
+                "grounded_senior"
+                if "Grounded Senior" in self.answer_mode_var.get()
+                else "senior"
+                if "Senior" in self.answer_mode_var.get()
+                else "standard"
+            ),
             on_chunk=lambda text, rid=request_id: self._enqueue("chunk", rid, text),
             on_complete=lambda rid=request_id: self._enqueue("complete", rid, ""),
             on_error=lambda message, rid=request_id: self._enqueue("error", rid, message),
@@ -463,6 +501,10 @@ class CopilotWindow:
         self._request_started_at = perf_counter()
         self._has_streamed_content = False
         self._user_at_bottom = False
+        self._last_chunk_request_id = request_id
+        self._last_chunk_payload = ""
+        self._pre_request_output_text = self._current_output_text()
+        self._pre_request_was_coding_session = self.in_coding_session
         logger.info(
             "LLM request start timestamp: %s (request_id=%s)",
             datetime.now().isoformat(timespec="milliseconds"),
@@ -568,25 +610,47 @@ class CopilotWindow:
 
             if kind == "chunk":
                 self._debug_log("render_chunk", f"request_id={request_id} chars={len(payload)}")
+                if (
+                    self._last_chunk_request_id == request_id
+                    and payload
+                    and payload == self._last_chunk_payload
+                ):
+                    self._debug_log(
+                        "drop_duplicate_chunk",
+                        f"request_id={request_id} chars={len(payload)}",
+                    )
+                    continue
                 if not self._has_streamed_content:
                     logger.info(
                         "LLM first-token UI timestamp: %s (request_id=%s)",
                         datetime.now().isoformat(timespec="milliseconds"),
                         request_id,
                     )
-                    self._replace_output("")
+                    self._prepare_output_for_new_answer()
                 self._append_output(payload)
                 self._has_streamed_content = True
+                self._last_chunk_request_id = request_id
+                self._last_chunk_payload = payload
+                if self.in_coding_session:
+                    self.output.see(tk.END)
             elif kind == "complete":
                 self._debug_log("render_complete", f"request_id={request_id} done")
                 self._active_request_id = None
                 self._llm_state = "idle"
+                self._last_chunk_request_id = None
+                self._last_chunk_payload = ""
+                self._pre_request_output_text = ""
+                self._pre_request_was_coding_session = False
                 self._clear_transcript()
                 self._update_controls()
             elif kind == "error":
                 self._debug_log("render_error", f"request_id={request_id} chars={len(payload)}")
                 self._active_request_id = None
                 self._llm_state = "idle"
+                self._last_chunk_request_id = None
+                self._last_chunk_payload = ""
+                self._pre_request_output_text = ""
+                self._pre_request_was_coding_session = False
                 self._replace_output(payload)
                 self.output.see("1.0")
                 self._update_controls()
@@ -606,6 +670,35 @@ class CopilotWindow:
         self.output.config(state=tk.NORMAL)
         self.output.insert(tk.END, text)
         self.output.config(state=tk.DISABLED)
+
+    def _current_output_text(self) -> str:
+        return self.output.get("1.0", tk.END).strip()
+
+    def _prepare_output_for_new_answer(self) -> None:
+        question_type = self.orchestrator.current_question_type
+        should_append = question_type == "CODING" or (
+            question_type == "FOLLOW_UP" and self._pre_request_was_coding_session
+        )
+
+        if should_append:
+            self.in_coding_session = True
+            existing_text = self._pre_request_output_text
+            if existing_text in {
+                "Ready",
+                "Thinking...",
+                "Connecting...",
+                "Listening...",
+                "No question sent.",
+            }:
+                existing_text = ""
+            separator = f"--- {datetime.now().strftime('%H:%M:%S')} ---"
+            new_text = f"{existing_text}\n\n{separator}\n" if existing_text else f"{separator}\n"
+            self._replace_output(new_text)
+            self.output.see(tk.END)
+            return
+
+        self.in_coding_session = False
+        self._replace_output("")
 
     def _on_output_scroll(self, first: str, last: str) -> None:
         self._output_scrollbar_set(first, last)

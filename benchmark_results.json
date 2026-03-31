@@ -1,0 +1,384 @@
+{
+  "per_run_results": [
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "behavioral",
+      "run": 1,
+      "ttft_ms": 362.46,
+      "total_time_ms": 377.97
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "behavioral",
+      "run": 2,
+      "ttft_ms": 238.61,
+      "total_time_ms": 369.5
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "behavioral",
+      "run": 3,
+      "ttft_ms": 305.46,
+      "total_time_ms": 316.67
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "coding_text",
+      "run": 1,
+      "ttft_ms": 204.98,
+      "total_time_ms": 356.83
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "coding_text",
+      "run": 2,
+      "ttft_ms": 272.01,
+      "total_time_ms": 417.93
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "coding_text",
+      "run": 3,
+      "ttft_ms": 203.49,
+      "total_time_ms": 299.54
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "system_design",
+      "run": 1,
+      "ttft_ms": 451.81,
+      "total_time_ms": 451.81
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "system_design",
+      "run": 2,
+      "ttft_ms": 1016.2,
+      "total_time_ms": 1016.2
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "system_design",
+      "run": 3,
+      "ttft_ms": 461.35,
+      "total_time_ms": 461.35
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "behavioral",
+      "run": 1,
+      "ttft_ms": 402.99,
+      "total_time_ms": 640.05
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "behavioral",
+      "run": 2,
+      "ttft_ms": 349.96,
+      "total_time_ms": 565.56
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "behavioral",
+      "run": 3,
+      "ttft_ms": 544.56,
+      "total_time_ms": 804.87
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "coding_text",
+      "run": 1,
+      "ttft_ms": 1482.16,
+      "total_time_ms": 1763.66
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "coding_text",
+      "run": 2,
+      "ttft_ms": 263.36,
+      "total_time_ms": 604.79
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "coding_text",
+      "run": 3,
+      "ttft_ms": 300.26,
+      "total_time_ms": 573.1
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "system_design",
+      "run": 1,
+      "ttft_ms": 246.42,
+      "total_time_ms": 526.36
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "system_design",
+      "run": 2,
+      "ttft_ms": 506.87,
+      "total_time_ms": 748.44
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "system_design",
+      "run": 3,
+      "ttft_ms": 490.54,
+      "total_time_ms": 668.75
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "behavioral",
+      "run": 1,
+      "ttft_ms": 228.03,
+      "total_time_ms": 729.69
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "behavioral",
+      "run": 2,
+      "ttft_ms": 280.62,
+      "total_time_ms": 784.37
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "behavioral",
+      "run": 3,
+      "ttft_ms": 328.88,
+      "total_time_ms": 825.93
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_text",
+      "run": 1,
+      "ttft_ms": 133.6,
+      "total_time_ms": 601.74
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_text",
+      "run": 2,
+      "ttft_ms": 438.91,
+      "total_time_ms": 946.28
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_text",
+      "run": 3,
+      "ttft_ms": 370.49,
+      "total_time_ms": 871.6
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "system_design",
+      "run": 1,
+      "ttft_ms": 523.07,
+      "total_time_ms": 1002.16
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "system_design",
+      "run": 2,
+      "ttft_ms": 90.35,
+      "total_time_ms": 596.07
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "system_design",
+      "run": 3,
+      "ttft_ms": 471.78,
+      "total_time_ms": 983.65
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "behavioral",
+      "run": 1,
+      "ttft_ms": 1910.86,
+      "total_time_ms": 3829.99
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "behavioral",
+      "run": 2,
+      "ttft_ms": 1873.21,
+      "total_time_ms": 3473.22
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "behavioral",
+      "run": 3,
+      "ttft_ms": 1205.94,
+      "total_time_ms": 5995.47
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_text",
+      "run": 1,
+      "ttft_ms": 1371.29,
+      "total_time_ms": 2690.84
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_text",
+      "run": 2,
+      "ttft_ms": 590.89,
+      "total_time_ms": 2485.99
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_text",
+      "run": 3,
+      "ttft_ms": 1490.81,
+      "total_time_ms": 3406.03
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "system_design",
+      "run": 1,
+      "ttft_ms": 1251.94,
+      "total_time_ms": 4513.18
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "system_design",
+      "run": 2,
+      "ttft_ms": 453.16,
+      "total_time_ms": 3337.45
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "system_design",
+      "run": 3,
+      "ttft_ms": 962.62,
+      "total_time_ms": 3902.4
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_image",
+      "run": 1,
+      "ttft_ms": 786.35,
+      "total_time_ms": 1295.03
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_image",
+      "run": 2,
+      "ttft_ms": 1167.99,
+      "total_time_ms": 1671.12
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_image",
+      "run": 3,
+      "ttft_ms": 947.5,
+      "total_time_ms": 1427.3
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_image",
+      "run": 1,
+      "ttft_ms": 3715.54,
+      "total_time_ms": 6766.49
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_image",
+      "run": 2,
+      "ttft_ms": 3591.78,
+      "total_time_ms": 8056.39
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_image",
+      "run": 3,
+      "ttft_ms": 4028.25,
+      "total_time_ms": 6690.31
+    }
+  ],
+  "summary": [
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "behavioral",
+      "ttft_median_ms": 305.46,
+      "total_time_median_ms": 369.5
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "coding_text",
+      "ttft_median_ms": 204.98,
+      "total_time_median_ms": 356.83
+    },
+    {
+      "model": "openai/gpt-oss-20b",
+      "scenario": "system_design",
+      "ttft_median_ms": 461.35,
+      "total_time_median_ms": 461.35
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "behavioral",
+      "ttft_median_ms": 402.99,
+      "total_time_median_ms": 640.05
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "coding_text",
+      "ttft_median_ms": 300.26,
+      "total_time_median_ms": 604.79
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "system_design",
+      "ttft_median_ms": 490.54,
+      "total_time_median_ms": 668.75
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "behavioral",
+      "ttft_median_ms": 280.62,
+      "total_time_median_ms": 784.37
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_text",
+      "ttft_median_ms": 370.49,
+      "total_time_median_ms": 871.6
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "system_design",
+      "ttft_median_ms": 471.78,
+      "total_time_median_ms": 983.65
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "behavioral",
+      "ttft_median_ms": 1873.21,
+      "total_time_median_ms": 3829.99
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_text",
+      "ttft_median_ms": 1371.29,
+      "total_time_median_ms": 2690.84
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "system_design",
+      "ttft_median_ms": 962.62,
+      "total_time_median_ms": 3902.4
+    },
+    {
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "scenario": "coding_image",
+      "ttft_median_ms": 947.5,
+      "total_time_median_ms": 1427.3
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "coding_image",
+      "ttft_median_ms": 3715.54,
+      "total_time_median_ms": 6766.49
+    }
+  ]
+}

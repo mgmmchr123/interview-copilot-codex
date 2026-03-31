@@ -16,6 +16,8 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 STT_PROVIDER = "deepgram"
 ASSEMBLYAI_MODEL = "nano"
 ASSEMBLYAI_ENABLE_KEYTERMS = True
@@ -57,6 +59,8 @@ class AppConfig:
     ollama_model: str
     openai_api_key: str
     openai_model: str
+    groq_api_key: str
+    groq_base_url: str
     stt_provider: str
     assemblyai_api_key: str
     assemblyai_model: str
@@ -88,6 +92,8 @@ class AppConfig:
             ollama_model=os.getenv("OLLAMA_MODEL", OLLAMA_MODEL).strip() or OLLAMA_MODEL,
             openai_api_key=os.getenv("OPENAI_API_KEY", OPENAI_API_KEY).strip(),
             openai_model=os.getenv("OPENAI_MODEL", OPENAI_MODEL).strip() or OPENAI_MODEL,
+            groq_api_key=os.getenv("GROQ_API_KEY", GROQ_API_KEY).strip(),
+            groq_base_url=os.getenv("GROQ_BASE_URL", GROQ_BASE_URL).strip() or GROQ_BASE_URL,
             stt_provider=os.getenv("STT_PROVIDER", STT_PROVIDER).strip() or STT_PROVIDER,
             assemblyai_api_key=os.getenv("ASSEMBLYAI_API_KEY", "").strip(),
             assemblyai_model=(

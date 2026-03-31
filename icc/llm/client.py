@@ -40,18 +40,45 @@ class LlmClient:
         images_b64: list[str] | None = None,
         model: str | None = None,
         max_tokens: int = 400,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
-        if self.provider == "openai":
-            yield from self._stream_openai(
-                prompt,
-                system,
-                history,
-                images_b64,
-                model,
-                max_tokens,
-            )
-            return
-        yield from self._stream_ollama(f"{system}\n\n{prompt}" if system else prompt)
+        yield from self._stream_openai(
+            prompt,
+            system,
+            history,
+            images_b64,
+            model,
+            max_tokens,
+            api_key,
+            base_url,
+            timeout,
+        )
+
+    def complete_text(
+        self,
+        prompt: str,
+        system: str = "",
+        history: list[dict] | None = None,
+        images_b64: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int = 400,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        return self._complete_openai(
+            prompt=prompt,
+            system=system,
+            history=history,
+            images_b64=images_b64,
+            model=model,
+            max_tokens=max_tokens,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+        )
 
     def _stream_ollama(self, prompt: str) -> Iterator[str]:
         self._stream_started_at = perf_counter()
@@ -113,6 +140,9 @@ class LlmClient:
         images_b64: list[str] | None = None,
         model: str | None = None,
         max_tokens: int = 400,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
         import openai
 
@@ -123,7 +153,145 @@ class LlmClient:
             f"prompt_chars={len(prompt)} model={selected_model}",
         )
 
-        client = openai.OpenAI(api_key=self.config.openai_api_key)
+        client = openai.OpenAI(
+            api_key=api_key or self.config.openai_api_key,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=0,
+        )
+
+        if selected_model == "gpt-5.4-mini" and images_b64 and base_url is None:
+            yield from self._stream_openai_responses(
+                client=client,
+                prompt=prompt,
+                system=system,
+                history=history,
+                images_b64=images_b64,
+                model=selected_model,
+                max_tokens=max_tokens,
+            )
+            return
+
+        messages = self._build_messages(prompt, system, history, images_b64)
+
+        try:
+            stream = client.chat.completions.create(
+                model=selected_model,
+                messages=messages,
+                stream=True,
+                max_tokens=max_tokens,
+                stream_options={"include_usage": True},
+            )
+            final_usage = None
+            for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    final_usage = usage
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    self._debug_log("yield_chunk", f"chars={len(delta)} text={delta!r}")
+                    yield delta
+            if final_usage is not None:
+                logger.info(
+                    "OpenAI usage: completion_tokens=%s total_tokens=%s",
+                    getattr(final_usage, "completion_tokens", None),
+                    getattr(final_usage, "total_tokens", None),
+                )
+        except openai.OpenAIError as exc:
+            raise RuntimeError(f"OpenAI error: {exc}") from exc
+
+    def _stream_openai_responses(
+        self,
+        client,
+        prompt: str,
+        system: str,
+        history: list[dict] | None,
+        images_b64: list[str],
+        model: str,
+        max_tokens: int,
+    ) -> Iterator[str]:
+        import openai
+
+        response_input = self._build_responses_input(prompt, history, images_b64)
+
+        try:
+            stream = client.responses.create(
+                model=model,
+                instructions=system or None,
+                input=response_input,
+                stream=True,
+                max_output_tokens=max_tokens,
+            )
+            final_usage = None
+            for event in stream:
+                if getattr(event, "type", "") == "response.output_text.delta":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        self._debug_log("yield_chunk", f"chars={len(delta)} text={delta!r}")
+                        yield delta
+                elif getattr(event, "type", "") == "response.completed":
+                    final_usage = getattr(getattr(event, "response", None), "usage", None)
+            if final_usage is not None:
+                logger.info(
+                    "OpenAI usage: completion_tokens=%s total_tokens=%s",
+                    getattr(final_usage, "output_tokens", None),
+                    getattr(final_usage, "total_tokens", None),
+                )
+        except openai.OpenAIError as exc:
+            raise RuntimeError(f"OpenAI error: {exc}") from exc
+
+    def _complete_openai(
+        self,
+        prompt: str,
+        system: str = "",
+        history: list[dict] | None = None,
+        images_b64: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int = 400,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        import openai
+
+        selected_model = model or self.config.openai_model
+        client = openai.OpenAI(
+            api_key=api_key or self.config.openai_api_key,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=0,
+        )
+        messages = self._build_messages(prompt, system, history, images_b64)
+
+        try:
+            response = client.chat.completions.create(
+                model=selected_model,
+                messages=messages,
+                stream=False,
+                max_tokens=max_tokens,
+            )
+        except openai.OpenAIError as exc:
+            raise RuntimeError(f"OpenAI error: {exc}") from exc
+
+        if not response.choices:
+            return ""
+
+        content = response.choices[0].message.content
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return ""
+        return str(content)
+
+    def _build_messages(
+        self,
+        prompt: str,
+        system: str = "",
+        history: list[dict] | None = None,
+        images_b64: list[str] | None = None,
+    ) -> list[dict[str, object]]:
         messages: list[dict[str, object]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -147,28 +315,33 @@ class LlmClient:
             user_content = prompt
 
         messages.append({"role": "user", "content": user_content})
+        return messages
 
-        try:
-            stream = client.chat.completions.create(
-                model=selected_model,
-                messages=messages,
-                stream=True,
-                max_tokens=max_tokens,
-                stream_options={"include_usage": True},
+    def _build_responses_input(
+        self,
+        prompt: str,
+        history: list[dict] | None = None,
+        images_b64: list[str] | None = None,
+    ) -> list[dict[str, object]]:
+        input_items: list[dict[str, object]] = []
+
+        for item in history or []:
+            role = str(item.get("role", "")).strip()
+            content = item.get("content", "")
+            if role not in {"user", "assistant", "system", "developer"}:
+                continue
+            if isinstance(content, str):
+                input_items.append({"role": role, "content": content})
+
+        user_content: list[dict[str, object]] = []
+        for image_b64 in images_b64 or []:
+            user_content.append(
+                {
+                    "type": "input_image",
+                    "image_url": f"data:image/png;base64,{image_b64}",
+                    "detail": "high",
+                }
             )
-            for chunk in stream:
-                usage = getattr(chunk, "usage", None)
-                if usage is not None:
-                    logger.info(
-                        "OpenAI usage: completion_tokens=%s total_tokens=%s",
-                        getattr(usage, "completion_tokens", None),
-                        getattr(usage, "total_tokens", None),
-                    )
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    self._debug_log("yield_chunk", f"chars={len(delta)} text={delta!r}")
-                    yield delta
-        except openai.OpenAIError as exc:
-            raise RuntimeError(f"OpenAI error: {exc}") from exc
+        user_content.append({"type": "input_text", "text": prompt})
+        input_items.append({"role": "user", "content": user_content})
+        return input_items

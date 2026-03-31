@@ -1,0 +1,1179 @@
+================================================================================
+MODEL: openai/gpt-oss-20b
+CASE: coding_easy
+EXPECTED: hashmap, O(n)
+PROMPT:
+Given an array of integers nums and an integer target, return the indices of the two numbers such that they add up to target. You may assume that each input would have exactly one solution, and you may not use the same element twice.
+
+ANSWER:
+**Problem**
+
+> Given an array of integers `nums` and an integer `target`, return the indices of the two numbers that add up to `target`.  
+> Each input has exactly one solution, and you may not use the same element twice.
+
+---
+
+## 1.  Intuition
+
+We need to find two numbers `a` and `b` such that  
+
+```
+a + b = target
+```
+
+If we scan the array once, for each element `nums[i]` we can ask: *“What number would I need to reach the target?”*  
+That number is `target - nums[i]`.  
+If we have already seen that number earlier in the array, we have found the pair.
+
+The natural data structure for “has this number been seen?” is a **hash map** (dictionary).  
+The map will store the value → its index.
+
+---
+
+## 2.  Algorithm (Hash‑Map / One‑Pass)
+
+```
+create empty map: value -> index
+for i from 0 to len(nums)-1
+    complement = target - nums[i]
+    if complement in map
+        return [map[complement], i]
+    map[nums[i]] = i
+```
+
+* We iterate once over the array.  
+* For each element we compute the complement.  
+* If the complement is already in the map, we have found the two indices.  
+* Otherwise we store the current element in the map and continue.
+
+Because the problem guarantees exactly one solution, we can return immediately when we find it.
+
+---
+
+## 3.  Correctness Proof
+
+We prove that the algorithm returns the correct pair of indices.
+
+**Lemma 1**  
+When the algorithm reaches index `i`, the map contains exactly the values of `nums[0] … nums[i-1]` mapped to their indices.
+
+*Proof.*  
+The map is initially empty.  
+During each iteration we insert `nums[i]` into the map after the lookup.  
+Thus after finishing iteration `i-1`, the map holds all values up to `i-1`. ∎
+
+**Lemma 2**  
+If the algorithm returns `[j, i]`, then `nums[j] + nums[i] = target`.
+
+*Proof.*  
+The algorithm returns only when `complement = target - nums[i]` is found in the map.  
+Let `j = map[complement]`.  
+By construction of the map, `nums[j] = complement`.  
+Hence `nums[j] + nums[i] = complement + nums[i] = target`. ∎
+
+**Theorem**  
+The algorithm returns the unique pair of indices that sum to `target`.
+
+*Proof.*  
+Let the unique solution be indices `(p, q)` with `p < q`.  
+During iteration `q`, by Lemma 1 the map contains `nums[p]`.  
+The complement computed is `target - nums[q] = nums[p]`.  
+Thus the algorithm will find `nums[p]` in the map and return `[p, q]`.  
+No earlier iteration can return a pair because the complement would not yet be in the map.  
+Therefore the algorithm returns exactly the required pair. ∎
+
+---
+
+## 4.  Complexity Analysis
+
+| Step | Time | Space |
+|------|------|-------|
+| Building map while iterating | **O(n)** | **O(n)** (worst‑case, all elements distinct) |
+| Lookup per element | **O(1)** average | – |
+
+Overall: **Time O(n)**, **Space
+
+================================================================================
+MODEL: openai/gpt-oss-20b
+CASE: coding_medium
+EXPECTED: hashmap + doubly linked list, O(1)
+PROMPT:
+Design and implement an LRU Cache with get and put operations in O(1) average time.
+
+ANSWER:
+## LRU Cache – Design & Implementation
+
+### 1. Problem Recap
+Implement a cache that
+
+| Operation | Time Complexity |
+|-----------|-----------------|
+| `get(key)` | **O(1)** |
+| `put(key, value)` | **O(1)** |
+
+The cache has a fixed capacity. When the capacity is exceeded, the *least‑recently used* entry is evicted.
+
+---
+
+### 2. Core Idea
+
+To achieve O(1) for both operations we need:
+
+1. **Fast key → value lookup** – a hash map (`dict` in Python).
+2. **Fast ordering of usage** – a data structure that lets us move an element to the “most‑recent” end and remove the “least‑recent” element in O(1).
+
+A **doubly linked list** gives us exactly that:  
+- Each node knows its previous and next node.  
+- We can remove or insert a node in O(1) if we already have a reference to it.  
+- We keep two dummy sentinel nodes: `head` (most recent) and `tail` (least recent).  
+- The node right after `head` is the most recently used; the node right before `tail` is the least recently used.
+
+The hash map stores `key → node` so that we can instantly locate the node for a `get` or `put`.
+
+---
+
+### 3. Data Structures
+
+```text
+class Node:
+    key: int
+    val: int
+    prev: Node | None
+    next: Node | None
+```
+
+```text
+LRUCache:
+    capacity: int
+    cache: dict[int, Node]          # key → node
+    head: Node (dummy)
+    tail: Node (dummy)
+```
+
+- `head.next` → most recent node
+- `tail.prev` → least recent node
+
+---
+
+### 4. Operations
+
+| Operation | Steps |
+|-----------|-------|
+| **`get(key)`** | 1. If key not in `cache`, return `-1`. <br>2. Retrieve node. <br>3. Move node to front (most recent). <br>4. Return node.val. |
+| **`put(key, value)`** | 1. If key already exists: update value and move node to front. <br>2. Else: create new node. <br>3. Insert node at front. <br>4. Add to `cache`. <br>5. If size > capacity: remove node before `tail` (least recent) and delete from `cache`. |
+
+**Helper methods**
+
+- `remove(node)` – unlink node from list.
+- `add_to_front(node)` – insert node right after `head`.
+
+All helper methods run in O(1).
+
+---
+
+### 5. Python Implementation
+
+```python
+from __future__ import annotations
+from typing import Optional
+
+class Node:
+    __slots__ = ("key", "val", "prev", "next")
+
+    def __init__(self, key: int = 0, val: int = 0):
+        self.key: int = key
+        self.val: int = val
+        self.prev: Optional[Node] = None
+        self.next: Optional[Node] = None
+
+
+class LRUCache:
+    def __init__(self, capacity: int):
+        if capacity <= 0:
+            raise
+
+================================================================================
+MODEL: openai/gpt-oss-20b
+CASE: coding_hard
+EXPECTED: binary search, O(log(m+n))
+PROMPT:
+Given two sorted arrays nums1 and nums2 of size m and n respectively, return the median of the two sorted arrays. The overall run time complexity should be O(log(m+n)).
+
+ANSWER:
+**Problem Recap**
+
+You’re given two sorted arrays
+
+```
+nums1 : length m
+nums2 : length n
+```
+
+Return the median of the *combined* sorted array.  
+The required time complexity is **O(log (m + n))** – i.e. logarithmic in the total number of elements.
+
+---
+
+## 1.  High‑level idea
+
+The median is the element that would be in the middle if all elements were merged and sorted.  
+Instead of actually merging (which would be O(m + n)), we can **partition** the two arrays so that:
+
+* The left side contains exactly half of the total elements (or one more if the total is odd).
+* Every element on the left side is ≤ every element on the right side.
+
+If we can find such a partition, the median is simply:
+
+* `max(left_max)` if the total number of elements is odd.
+* `(max(left_max) + min(right_min)) / 2` if the total is even.
+
+The key is to find the partition in logarithmic time.  
+We do this by binary‑searching on the *smaller* array.
+
+---
+
+## 2.  Detailed algorithm
+
+Let `A` be the shorter array (`len(A) ≤ len(B)`), `m = len(A)`, `n = len(B)`.
+
+We binary‑search on `i`, the number of elements taken from `A` for the left side.  
+`j` is then forced: `j = (m + n + 1) // 2 - i` (the `+1` handles odd totals).
+
+We maintain the invariant:
+
+```
+A[i-1] ≤ B[j]   and   B[j-1] ≤ A[i]
+```
+
+If the invariant is violated on the left side (`A[i-1] > B[j]`), we need fewer elements from `A` → move `i` left.  
+If violated on the right side (`B[j-1] > A[i]`), we need more elements from `A` → move `i` right.
+
+When the invariant holds, we have found the correct partition.
+
+Edge values are handled by treating out‑of‑range indices as `-∞` or `+∞`:
+
+```
+A_left  = A[i-1] if i > 0     else -∞
+A_right = A[i]   if i < m     else +∞
+B_left  = B[j-1] if j > 0     else -∞
+B_right = B[j]   if j < n     else +∞
+```
+
+Finally compute the median as described above.
+
+---
+
+## 3.  Correctness proof sketch
+
+1. **Existence of a partition**  
+   Because `A` and `B` are sorted, for any `i` the left side contains the first `i` elements of `A` and the first `j` elements of `B`.  
+   As `i` ranges from `0` to `m`, `j` ranges from `(m+n+1)//2` down to `(m+n+1)//2 - m`.  
+   The left side size is always `(m+n+1)//2`, so the right side contains the rest.  
+   Therefore a partition exists for some `i`.
+
+2. **Binary search correctness**  
+   The condition `A[i-1] > B[j]` means the left side is too “heavy” on `A`; moving `i` left reduces `
+
+================================================================================
+MODEL: openai/gpt-oss-20b
+CASE: behavioral
+EXPECTED: clear STAR-style behavioral answer
+PROMPT:
+Tell me about a time you handled a production incident.
+
+ANSWER:
+**Situation**  
+In my last role at a SaaS company that serves ~200k daily active users, we had a 30‑minute outage on a Friday evening when the “subscription renewal” micro‑service went down. The service was responsible for charging customers and updating the billing database. The outage caused a cascade: the front‑end could not show the correct subscription status, the payment gateway was hit with duplicate charges, and the support team was flooded with tickets.
+
+**Task**  
+I was the on‑call backend engineer. My responsibilities were:  
+1. Restore the service as quickly as possible.  
+2. Identify the root cause.  
+3. Communicate with stakeholders (product, ops, support).  
+4. Prevent recurrence.
+
+**Action**  
+
+1. **Immediate triage**  
+   * Checked the health endpoint (`/healthz`) – it returned 500.  
+   * Looked at the logs in Loki/ELK: a spike in `java.lang.OutOfMemoryError: Java heap space`.  
+   * Confirmed the JVM heap was capped at 512 MB, but the service was allocating ~1.2 GB during a bulk renewal job that ran nightly.
+
+2. **Rollback / hot‑fix**  
+   * Switched the deployment to the previous stable image (Docker tag `v1.4.2`) using our Kubernetes deployment.  
+   * Updated the `deployment.yaml` to set `--max-threads=10` to throttle the renewal job.  
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: subscription-renewal
+   spec:
+     replicas: 3
+     template:
+       spec:
+         containers:
+         - name: renewal
+           image: registry.company.com/subscription-renewal:v1.4.2
+           args: ["--max-threads=10"]
+           resources:
+             limits:
+               memory: "1Gi"
+             requests:
+               memory: "512Mi"
+   ```
+   * The service came back online in ~2 minutes.  
+
+3. **Root‑cause analysis**  
+   * The nightly job was triggered by a cron job that processed all active subscriptions in a single batch.  
+   * The code used a `List<Subscription>` to hold all records in memory before processing, causing the OOM.  
+   * The bug was introduced in a recent refactor that removed pagination.
+
+4. **Permanent fix**  
+   * Refactored the job to stream records from the database using a cursor and process them in chunks of 500.  
+   ```java
+   try (ResultSet rs = stmt.executeQuery("SELECT id, plan FROM subscriptions WHERE active = true")) {
+       List<Subscription> batch = new ArrayList<>(BATCH_SIZE);
+       while (rs.next()) {
+           batch.add(new Subscription(rs.getLong("id"), rs.getString("plan")));
+           if (batch.size()
+
+================================================================================
+MODEL: openai/gpt-oss-20b
+CASE: system_design
+EXPECTED: scalable distributed design with tradeoffs
+PROMPT:
+Design a distributed rate limiter.
+
+ANSWER:
+
+
+================================================================================
+MODEL: openai/gpt-oss-120b
+CASE: coding_easy
+EXPECTED: hashmap, O(n)
+PROMPT:
+Given an array of integers nums and an integer target, return the indices of the two numbers such that they add up to target. You may assume that each input would have exactly one solution, and you may not use the same element twice.
+
+ANSWER:
+**Solution Overview**
+
+We need to find two distinct indices `i` and `j` in an integer array `nums` such that  
+
+```
+nums[i] + nums[j] == target
+```
+
+The problem guarantees that exactly one such pair exists and that we cannot reuse the same element (i.e., `i != j`).  
+
+The classic optimal solution uses a hash‑map (dictionary) to store the numbers we have seen so far and their indices. While scanning the array once, for each element `x = nums[k]` we ask:
+
+```
+needed = target - x
+```
+
+If `needed` is already in the map, we have found the answer: the stored index for `needed` and the current index `k`.  
+Otherwise we insert `x` with its index into the map and continue.
+
+Because each lookup/insert in a hash‑map is *amortized* O(1), the whole algorithm runs in linear time O(n) and uses O(n) extra space.
+
+---
+
+### Algorithm (Pseudo‑code)
+
+```
+function twoSum(nums, target):
+    map = empty hash map   // key: number, value: index
+    for i from 0 to nums.length-1:
+        complement = target - nums[i]
+        if map contains complement:
+            return [map[complement], i]
+        map[nums[i]] = i
+    // The problem guarantees a solution, so we never reach here.
+```
+
+---
+
+### Correctness Proof  
+
+We prove that the algorithm always returns the unique pair of indices whose values sum to `target`.
+
+*Lemma 1* – When the loop reaches index `i`, the map contains exactly the pairs `(nums[k], k)` for all `k < i`.  
+*Proof*: The map is initially empty. At each iteration we first query the map, then insert the current element `nums[i]` with its index `i`. Therefore after processing iteration `i` the map holds all elements up to and including `i`. By induction the lemma holds for every `i`. ∎
+
+*Lemma 2* – If the algorithm returns `[p, i]`, then `nums[p] + nums[i] = target`.  
+*Proof*: The algorithm returns only when `complement = target - nums[i]` is found in the map. By Lemma 1 the map entry `p` corresponds to an earlier index `p < i` with `nums[p] = complement`. Hence  
+
+```
+nums[p] + nums[i] = complement + nums[i] = target.
+``` ∎
+
+*Lemma 3* – The algorithm never returns an invalid pair (i.e., using the same index twice).  
+*Proof*: The map only stores indices `< i` (Lemma 1). When we find a complement we retrieve an index `p` that is strictly less than the current `i`. Thus `p != i`. ∎
+
+*Theorem* – The algorithm returns the unique solution pair.  
+*Proof*: Let the unique solution be indices `(a, b)` with `a < b`. When the loop reaches `i = b`, the map already contains `nums[a]` at index `a` (Lemma 1). The complement computed is `target - nums[b] = nums[a]`, which is present in the map, so the algorithm returns `[a, b]`. Because the problem guarantees exactly one solution, no other pair can satisfy the condition, and the algorithm will not return earlier (otherwise we would have found a second solution). ∎
+
+---
+
+### Complexity Analysis  
+
+| Step                     |
+
+================================================================================
+MODEL: openai/gpt-oss-120b
+CASE: coding_medium
+EXPECTED: hashmap + doubly linked list, O(1)
+PROMPT:
+Design and implement an LRU Cache with get and put operations in O(1) average time.
+
+ANSWER:
+## LRU Cache – Design & Implementation  
+
+**Goal** – Provide a cache that stores at most **capacity** key‑value pairs and evicts the *least‑recently‑used* entry when a new entry would exceed that capacity.  
+Both **`get(key)`** and **`put(key, value)`** must run in **O(1)** average time.
+
+---
+
+## 1. High‑level Idea  
+
+The classic O(1) solution combines two data structures:
+
+| Structure | What it stores | Why it gives O(1) |
+|-----------|----------------|-------------------|
+| **Hash map** (`Map<K, Node*>`) | Direct pointer to the node that holds a key‑value pair | `get`/`put` can locate a node by key in O(1) |
+| **Doubly‑linked list** | Nodes ordered from *most‑recent* (head) to *least‑recent* (tail) | Moving a node to the head or removing the tail is O(1) |
+
+When a key is accessed (via `get` or `put`), we move its node to the head of the list – that marks it as “most recently used”. When we need to evict, we simply pop the tail node (the least‑recently used).
+
+---
+
+## 2. Detailed Data Structures  
+
+```text
+Node
+ ├─ key   : K
+ ├─ value : V
+ ├─ prev  : Node*   // previous node in the list
+ └─ next  : Node*   // next node in the list
+```
+
+*The list is **circular** with dummy head/tail nodes* – this eliminates edge‑case checks for empty list, head insertion, tail removal, etc.
+
+```text
+head <-> most‑recent ... least‑recent <-> tail
+```
+
+The hash map stores `key → node` so we can instantly locate the node for any key.
+
+---
+
+## 3. Algorithm  
+
+### `get(key)`
+
+1. Look up `key` in the map.  
+   *If not found → return -1 (or `null`).*  
+2. Node exists → move it to the head of the list (most recent).  
+3. Return `node.value`.
+
+### `put(key, value)`
+
+1. If `key` already exists:  
+   * Update `node.value`.  
+   * Move node to head.  
+   * Done.
+2. Otherwise (new key):  
+   * If cache is at capacity → evict the tail node:  
+     - Remove it from the list.  
+     - Delete its entry from the map.  
+   * Create a new node with `key/value`.  
+   * Insert it right after the dummy head (most recent).  
+   * Add `key → node` to the map.
+
+All list manipulations (remove, insert after head) are constant‑time pointer updates.
+
+---
+
+## 4. Complexity Analysis  
+
+| Operation | Time | Space |
+|-----------|------|-------|
+| `get`     | O(1) (hash lookup + list splice) | – |
+| `put`     | O(1) (hash lookup + possible eviction + list splice) | – |
+| Overall   | O(capacity) for the whole structure (hash map + list) | – |
+
+The *average* O(1) holds because hash‑map operations are O(1)
+
+================================================================================
+MODEL: openai/gpt-oss-120b
+CASE: coding_hard
+EXPECTED: binary search, O(log(m+n))
+PROMPT:
+Given two sorted arrays nums1 and nums2 of size m and n respectively, return the median of the two sorted arrays. The overall run time complexity should be O(log(m+n)).
+
+ANSWER:
+**Solution Overview**
+
+We have two non‑decreasing integer arrays  
+
+* `nums1` of length `m`  
+* `nums2` of length `n`
+
+We must return the median of the *combined* multiset of `m+n` numbers.  
+The required time bound is `O(log(m+n))`, which rules out any linear‑time merge.  
+The classic way to achieve the logarithmic bound is a **binary‑search on the partition** of the two arrays (often called the “median of two sorted arrays” problem).
+
+---
+
+## 1.  Key Insight – Partition the two arrays
+
+Imagine we cut each array into a left part and a right part:
+
+```
+nums1:  |--- L1 ---|--- R1 ---|
+nums2:  |--- L2 ---|--- R2 ---|
+```
+
+Let  
+
+* `i` = number of elements taken from `nums1` for the left side (`0 ≤ i ≤ m`)  
+* `j` = number of elements taken from `nums2` for the left side (`0 ≤ j ≤ n`)
+
+We need the total left size to be exactly half of the combined length:
+
+```
+i + j = (m + n + 1) // 2          // the +1 makes it work for odd length
+```
+
+If we can find `i` (and consequently `j`) such that
+
+```
+max(L1, L2) ≤ min(R1, R2)
+```
+
+then every element in the left side is ≤ every element in the right side, i.e. we have a correct split.  
+The median is then:
+
+* If `(m+n)` is odd → `max(L1, L2)` (the biggest element on the left)
+* If `(m+n)` is even → `(max(L1, L2) + min(R1, R2)) / 2`
+
+Because the arrays are sorted, we can test the condition using only the border elements:
+
+```
+L1 = (i == 0) ? -∞ : nums1[i-1]
+R1 = (i == m) ? +∞ : nums1[i]
+L2 = (j == 0) ? -∞ : nums2[j-1]
+R2 = (j == n) ? +∞ : nums2[j]
+```
+
+---
+
+## 2.  Binary Search on the smaller array
+
+We binary‑search `i` in the range `[0, m]`.  
+Choosing the smaller array for the search guarantees `O(log min(m,n))` which is ≤ `O(log(m+n))`.
+
+At each step:
+
+```
+i = (low + high) // 2
+j = half_len - i
+```
+
+*If `L1 > R2`* → we have taken too many elements from `nums1`; move `high = i - 1`.  
+*If `L2 > R1`* → we have taken too few elements from `nums1`; move `low = i + 1`.  
+Otherwise we found the correct partition.
+
+The loop always terminates because the condition `L1 ≤ R2 && L2 ≤ R1` is monotonic with respect to `i`.
+
+---
+
+## 3.  Correctness Proof Sketch  
+
+We prove that the algorithm returns the median.
+
+### Lemma 1  
+For any `i` in `[0,m]` let `j = half_len - i`.  
+If `L1 ≤ R2` and `L2 ≤ R1` then every element
+
+================================================================================
+MODEL: openai/gpt-oss-120b
+CASE: behavioral
+EXPECTED: clear STAR-style behavioral answer
+PROMPT:
+Tell me about a time you handled a production incident.
+
+ANSWER:
+**Incident Overview**
+
+- **System:** High‑traffic e‑commerce checkout service (Java Spring Boot, Kafka, MySQL, Redis)
+- **Impact:** ~30 % of checkout requests failed with a 500 error for ~45 minutes, causing a revenue loss of roughly **$120 K** and a spike in customer support tickets.
+- **Time:** 02:13 AM UTC (off‑peak but still a significant load from overseas markets).
+
+Below is the end‑to‑end story of how I discovered, triaged, mitigated, and performed a post‑mortem on this incident.
+
+---
+
+## 1. Detection & Initial Triage
+
+| Tool | Signal |
+|------|--------|
+| **PagerDuty** (alert from SRE) | “HTTP 5xx rate > 2 % on checkout‑service-prod” |
+| **Grafana** (Prometheus) | Spike in `http_server_requests_seconds_count{status="500",uri="/checkout"}` |
+| **ELK** (Kibana) | “Exception: `java.sql.SQLTransientConnectionException`” |
+
+**First 5 minutes**
+
+1. **Acknowledge** the PagerDuty alert and join the incident channel.  
+2. Pull the latest **Grafana dashboard** for the checkout service to confirm the trend.  
+3. Run a quick **log tail** on the failing pods:
+
+```bash
+kubectl logs -l app=checkout-service -c app -f --since=5m | grep -i "SQLTransientConnectionException"
+```
+
+Result: dozens of lines like:
+
+```
+2026-03-31T02:12:47.123Z ERROR com.myco.checkout.CheckoutHandler - Transaction failed
+java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms.
+```
+
+**Hypothesis:** The connection pool to MySQL is exhausted.
+
+---
+
+## 2. Rapid Mitigation
+
+### 2.1 Reduce Load on the Failing Component
+
+The checkout flow is split into two micro‑services:
+
+1. **checkout‑service** – orchestrates the flow, writes the order to MySQL.
+2. **payment‑gateway‑proxy** – talks to external payment providers.
+
+I temporarily **circuit‑break** the checkout‑service’s call to MySQL so that the service returns a graceful “try again later” (HTTP 503) instead of a 500. This prevents the thread pool from being saturated and gives us breathing room.
+
+```java
+// In CheckoutHandler.java (added on‑the‑fly via a hot‑swap)
+if (!dataSource.isRunning()) {
+    response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+    response.getWriter().write("{\"error\":\"checkout temporarily unavailable\"}");
+    return;
+}
+```
+
+*Deployed via a rolling update of the `checkout-service` deployment (no downtime because the pods are already behind a load‑balancer).*
+
+### 2.2 Scale the Database Connection Pool
+
+The pool size was set to **30** (default for HikariCP). Our traffic at that hour required ~80 concurrent DB connections. I increased the pool size to **120** and added a **maxLifetime** of 30
+
+================================================================================
+MODEL: openai/gpt-oss-120b
+CASE: system_design
+EXPECTED: scalable distributed design with tradeoffs
+PROMPT:
+Design a distributed rate limiter.
+
+ANSWER:
+## Distributed Rate Limiter – Design Overview  
+
+Below is a **complete, interview‑style design** for a rate‑limiting service that can be used by any number of front‑end nodes (API gateways, micro‑services, edge proxies, etc.) in a **high‑traffic, multi‑region** environment.
+
+---
+
+### 1. Core Requirements  
+
+| Category | Requirement |
+|----------|-------------|
+| **Functional** | • Enforce a configurable request quota per *key* (user‑id, API‑key, IP, etc.)<br>• Support common algorithms: Fixed‑Window, Sliding‑Window, Token‑Bucket, Leaky‑Bucket<br>• Allow burst traffic (token‑bucket) and per‑second granularity<br>• Multi‑tenant: each client can have its own limit (QPS, burst, period) |
+| **Non‑functional** | • **Low latency** – < 1 ms per check in the hot path<br>• **High throughput** – millions of QPS across the fleet<br>• **Strong consistency** for a given key (no over‑allowance) – “at‑most‑N” guarantee<br>• **Scalable** – add nodes without hot‑spotting<br>• **Fault‑tolerant** – survive node/region failures, graceful degradation<br>• **Observability** – metrics, alerts, audit logs |
+| **Operational** | • Dynamic limit updates without restart<br>• Easy to deploy (container‑friendly)<br>• Works with existing tech stack (Redis, Cassandra, DynamoDB, etc.) |
+
+---
+
+### 2. High‑Level Architecture  
+
+```
++-------------------+          +-------------------+          +-------------------+
+|   Front‑end /     |  RPC/   |   Rate‑Limiter    |  RPC/   |   Rate‑Limiter    |
+|   API‑Gateway     |--------->|   Service (Shard) |<--------|   Service (Shard) |
+| (Nginx, Envoy…)   |  gRPC   |   (stateless)    |  gRPC   |   (stateless)    |
++-------------------+          +-------------------+          +-------------------+
+          |                               |                               |
+          |                               |                               |
+          |                               v                               |
+          |                     +-------------------+                     |
+          |                     |   Distributed     |                     |
+          |                     |   Data Store      |                     |
+          |                     | (Redis Cluster /  |                     |
+          |                     |  DynamoDB / etc.)|                     |
+
+================================================================================
+MODEL: meta-llama/llama-4-scout-17b-16e-instruct
+CASE: coding_easy
+EXPECTED: hashmap, O(n)
+PROMPT:
+Given an array of integers nums and an integer target, return the indices of the two numbers such that they add up to target. You may assume that each input would have exactly one solution, and you may not use the same element twice.
+
+ANSWER:
+**Two Sum Problem Solution**
+================================
+
+### Problem Statement
+
+Given an array of integers `nums` and an integer `target`, return the indices of the two numbers such that they add up to `target`.
+
+### Solution
+
+We can solve this problem using a hash table to store the numbers we have seen so far and their indices. This approach allows us to find the solution in O(n) time complexity.
+
+#### Code
+
+```python
+def two_sum(nums, target):
+    """
+    Returns the indices of the two numbers in the array that add up to the target.
+
+    Args:
+        nums (list): A list of integers.
+        target (int): The target sum.
+
+    Returns:
+        list: A list of two indices.
+    """
+    num_to_index = {}  # Hash table to store numbers and their indices
+
+    for i, num in enumerate(nums):
+        complement = target - num  # The number we need to find
+        if complement in num_to_index:
+            # If we have seen the complement before, return its index and the current index
+            return [num_to_index[complement], i]
+        # Otherwise, store the current number and its index
+        num_to_index[num] = i
+
+    # If no solution is found, return an empty list
+    return []
+
+# Example usage
+nums = [2, 7, 11, 15]
+target = 9
+print(two_sum(nums, target))  # Output: [0, 1]
+```
+
+### Explanation
+
+1. Create an empty hash table `num_to_index` to store numbers and their indices.
+2. Iterate through the `nums` array using `enumerate` to get both the index `i` and the value `num`.
+3. Calculate the complement of the current number `num` with respect to the `target`.
+4. Check if the complement is in the hash table. If it is, return the index of the complement and the current index `i`.
+5. If the complement is not in the hash table, store the current number and its index in the hash table.
+6. If no solution is found after iterating through the entire array, return an empty list.
+
+### Time and Space Complexity
+
+* Time complexity: O(n), where n is the length of the `nums` array.
+* Space complexity: O(n), where n is the length of the `nums` array. In the worst case, we need to store all numbers in the hash table.
+
+================================================================================
+MODEL: meta-llama/llama-4-scout-17b-16e-instruct
+CASE: coding_medium
+EXPECTED: hashmap + doubly linked list, O(1)
+PROMPT:
+Design and implement an LRU Cache with get and put operations in O(1) average time.
+
+ANSWER:
+**LRU Cache Design and Implementation**
+
+### Overview
+
+An LRU (Least Recently Used) Cache is a data structure that stores a limited number of items, evicting the least recently used item when the cache is full. We will design and implement an LRU Cache with `get` and `put` operations in O(1) average time.
+
+### Design
+
+To achieve O(1) average time complexity for both `get` and `put` operations, we will use a combination of two data structures:
+
+1.  **Hash Table (Dictionary)**: To store the cache items for fast lookups.
+2.  **Doubly Linked List**: To maintain the order of the cache items based on their recent usage.
+
+The hash table will allow us to access any cache item in O(1) time, and the doubly linked list will enable us to move the accessed item to the front (most recently used) and remove the least recently used item from the end in O(1) time.
+
+### Implementation
+
+Here is a Python implementation of the LRU Cache:
+
+```python
+from collections import OrderedDict
+
+class Node:
+    """Represents a node in the doubly linked list."""
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+        self.prev = None
+        self.next = None
+
+class LRUCache:
+    """LRU Cache implementation with O(1) average time complexity for get and put operations."""
+    def __init__(self, capacity: int):
+        """
+        Initializes the LRU Cache with the given capacity.
+
+        Args:
+        capacity (int): The maximum number of items the cache can hold.
+        """
+        self.capacity = capacity
+        self.cache = {}  # Hash table to store cache items
+        self.head = Node(0, 0)  # Dummy head node
+        self.tail = Node(0, 0)  # Dummy tail node
+        self.head.next = self.tail
+        self.tail.prev = self.head
+
+    def _add_node(self, node):
+        """Adds a node to the front of the doubly linked list."""
+        prev_node = self.head
+        next_node = self.head.next
+        prev_node.next = node
+        next_node.prev = node
+        node.prev = prev_node
+        node.next = next_node
+
+    def _remove_node(self, node):
+        """Removes a node from the doubly linked list."""
+        prev_node = node.prev
+        next_node = node.next
+        prev_node.next = next_node
+        next_node.prev = prev_node
+
+    def get(self, key: int) -> int:
+        """
+        Retrieves the value associated with the given key if it exists in the cache.
+
+        Args:
+        key (int): The key to look up.
+
+        Returns:
+        int: The value associated with the key if it exists; otherwise, -1.
+        """
+        if key in self.cache:
+            node = self.cache[key]
+            self._remove_node(node)
+            self._add_node(node)
+            return node.value
+        return -1
+
+    def put(self, key: int, value: int) -> None:
+        """
+        Inserts or updates the value associated with the given key in the cache.
+
+        Args:
+        key (int): The key to insert or update.
+        value (int): The value to associate with the key.
+        """
+        if key in self.cache:
+            self._remove_node(self.cache[key])
+        node = Node(key, value)
+        self._add_node(node)
+        self.cache[key] = node
+        if len(self.cache) > self.capacity:
+            lru_node = self.tail.prev
+            self._remove_node(lru_node)
+            del self.cache[lru_node.key]
+
+# Example usage:
+if __name__ == "__main__":
+    cache = LRUCache(2)
+
+================================================================================
+MODEL: meta-llama/llama-4-scout-17b-16e-instruct
+CASE: coding_hard
+EXPECTED: binary search, O(log(m+n))
+PROMPT:
+Given two sorted arrays nums1 and nums2 of size m and n respectively, return the median of the two sorted arrays. The overall run time complexity should be O(log(m+n)).
+
+ANSWER:
+**Median of Two Sorted Arrays**
+=================================
+
+**Problem Statement**
+--------------------
+
+Given two sorted arrays `nums1` and `nums2` of size `m` and `n` respectively, return the median of the two sorted arrays.
+
+**Constraints**
+---------------
+
+*   The overall run time complexity should be O(log(m+n)).
+
+**Solution**
+------------
+
+To solve this problem efficiently, we can use a modified binary search approach. The idea is to partition both arrays into two halves each and find the partition point such that the elements on the left side of the partition point in both arrays are less than or equal to the elements on the right side.
+
+### Algorithm
+
+1.  Ensure that `nums1` is the smaller array. If not, swap `nums1` and `nums2`.
+2.  Calculate the total length of both arrays: `total_length = m + n`.
+3.  If `total_length` is odd, the median is the middle element. If `total_length` is even, the median is the average of the two middle elements.
+4.  Perform binary search on `nums1` to find the partition point `i` such that:
+
+    *   `nums1[i-1] <= nums2[j]` and `nums2[j-1] <= nums1[i]`
+
+    where `j = (total_length + 1) // 2 - i`.
+
+5.  If `total_length` is odd, return `max(nums1[i-1], nums2[j-1])`.
+6.  If `total_length` is even, return `(max(nums1[i-1], nums2[j-1]) + min(nums1[i], nums2[j])) / 2`.
+
+### Code
+
+```python
+def findMedianSortedArrays(nums1, nums2):
+    """
+    Finds the median of two sorted arrays.
+
+    Args:
+    nums1 (list): The first sorted array.
+    nums2 (list): The second sorted array.
+
+    Returns:
+    float: The median of the two sorted arrays.
+    """
+    # Ensure nums1 is the smaller array
+    if len(nums1) > len(nums2):
+        nums1, nums2 = nums2, nums1
+
+    # Calculate the total length
+    total_length = len(nums1) + len(nums2)
+
+    # Perform binary search
+    left, right = 0, len(nums1)
+    while left <= right:
+        # Partition point for nums1
+        i = (left + right) // 2
+        # Partition point for nums2
+        j = (total_length + 1) // 2 - i
+
+        # Calculate the values at the partition points
+        nums1_left = nums1[i-1] if i != 0 else float('-infinity')
+        nums1_right = nums1[i] if i != len(nums1) else float('infinity')
+        nums2_left = nums2[j-1] if j != 0 else float('-infinity')
+        nums2_right = nums2[j] if j != len(nums2) else float('infinity')
+
+        # Check if the partition is correct
+        if nums1_left <= nums2_right and nums2_left <= nums1_right:
+            # If total_length is odd, return the max of the left values
+            if total_length % 2 == 1:
+                return max(nums1_left, nums2_left)
+            # If total_length is even, return the average of the max of the left values and the min of the right values
+            else:
+                return (max(nums1_left, nums2_left) + min(nums1_right, nums2_right)) / 2
+        # If the partition is not correct, adjust the pointers
+        elif nums1_left > nums2_right:
+            right = i - 1
+        else:
+            left = i + 1
+
+================================================================================
+MODEL: meta-llama/llama-4-scout-17b-16e-instruct
+CASE: behavioral
+EXPECTED: clear STAR-style behavioral answer
+PROMPT:
+Tell me about a time you handled a production incident.
+
+ANSWER:
+**Production Incident: Root Cause Analysis and Resolution**
+
+In my previous role as a backend engineer, I recall a significant production incident that occurred during a peak traffic period. Our e-commerce platform's payment processing service experienced an outage, resulting in failed transactions and lost revenue.
+
+### Incident Summary
+
+* **Date:** February 10th, 2022
+* **Duration:** 2 hours and 15 minutes
+* **Impact:** 15% of users experienced failed transactions, resulting in an estimated loss of $10,000 in revenue
+
+### Incident Timeline
+
+1. **Initial Detection:** Our monitoring tools alerted the team to an unusual spike in error rates and latency at 14:45 UTC.
+2. **Initial Response:** I was part of the on-call rotation and immediately started investigating the issue.
+3. **Initial Assessment:** I quickly reviewed the logs, metrics, and monitoring data to understand the scope of the problem.
+
+### Root Cause Analysis
+
+After analyzing the data, I suspected that the issue might be related to a recent deployment of a new payment gateway integration. I:
+
+1. **Reviewed Code Changes:** Verified that the recent deployment involved changes to the payment processing workflow.
+2. **Checked for Dependency Issues:** Confirmed that all dependencies, including the payment gateway API, were functioning correctly.
+
+Further investigation revealed that a misconfigured circuit breaker in our payment processing service was causing the outage. The circuit breaker was not properly handling failures, leading to a cascade of errors and eventual service unavailability.
+
+### Resolution
+
+To resolve the incident:
+
+1. **Rollback Changes:** I temporarily rolled back the recent deployment to a previous stable version.
+2. **Circuit Breaker Configuration:** I updated the circuit breaker configuration to properly handle failures and prevent cascading errors.
+3. **Verification:** I verified that the service was functioning correctly and that transactions were being processed successfully.
+
+### Post-Incident Review
+
+After resolving the incident, I:
+
+1. **Documented the Incident:** Wrote a detailed post-mortem report outlining the root cause, resolution, and areas for improvement.
+2. **Implemented Additional Monitoring:** Added more comprehensive monitoring and alerting for the payment processing service to prevent similar incidents in the future.
+
+### Code Example (simplified)
+
+Here is a simplified example of a circuit breaker implementation in Python using the `tenacity` library:
+```python
+import logging
+import random
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+logging.basicConfig(level=logging.INFO)
+
+class PaymentGateway:
+    def __init__(self, max_attempts=3, timeout=1):
+        self.max_attempts = max_attempts
+        self.timeout = timeout
+
+    @retry(stop=stop_after_attempt(max_attempts), wait=wait_exponential(multiplier=1, min=self.timeout))
+    def process_payment(self, amount):
+        # Simulate payment processing
+        if random.random() < 0.2:  # 20% chance of failure
+            raise Exception("Payment processing failed")
+        return f"Payment of ${amount} processed successfully"
+
+# Usage
+gateway = PaymentGateway(max_attempts=3, timeout=1)
+try:
+    result = gateway.process_payment(10.99)
+    logging.info(result)
+except Exception as e:
+    logging.error(f"Payment processing failed: {str(e)}")
+```
+In this example, the `PaymentGateway` class uses a circuit breaker to retry failed payment processing attempts. The `process_payment` method is decorated with `@retry` to specify the retry policy.
+
+### Takeaways
+
+* Monitor your services closely to detect issues early.
+* Implement circuit breakers and retries to handle transient failures.
+* Continuously review and improve your incident response processes.
+
+================================================================================
+MODEL: meta-llama/llama-4-scout-17b-16e-instruct
+CASE: system_design
+EXPECTED: scalable distributed design with tradeoffs
+PROMPT:
+Design a distributed rate limiter.
+
+ANSWER:
+Designing a Distributed Rate Limiter
+=====================================
+
+Overview
+--------
+
+A distributed rate limiter is a system that limits the number of requests from a client or a group of clients within a certain time frame. This is commonly used to prevent abuse, denial-of-service (DoS) attacks, and to ensure fair usage of resources.
+
+Requirements
+------------
+
+*   **Distributed**: The rate limiter should be able to handle a large number of clients across multiple machines.
+*   **Scalable**: The system should be able to handle a large volume of requests.
+*   **Accurate**: The system should accurately enforce the rate limit.
+
+Design Components
+-----------------
+
+### 1. Data Store
+
+*   We will use a distributed data store like Redis or Apache Cassandra to store the request counts. These data stores are designed for high availability and scalability.
+
+### 2. Request Identifier
+
+*   We need a unique identifier for each client. This can be an IP address, user ID, or any other unique identifier.
+
+### 3. Rate Limiting Algorithm
+
+*   We will use the **Token Bucket** algorithm, which is a widely used algorithm for rate limiting.
+
+Token Bucket Algorithm
+----------------------
+
+The token bucket algorithm works as follows:
+
+*   A bucket is filled with tokens at a rate of `R` tokens per second.
+*   Each incoming request consumes one token.
+*   If the bucket is empty, the request is blocked until a token is available.
+
+Distributed Rate Limiter Design
+-------------------------------
+
+### 1. Architecture
+
+*   The system consists of multiple rate limiter nodes, each with a local Redis instance.
+*   Each node is responsible for a subset of clients.
+
+### 2. Request Flow
+
+1.  Client sends a request to the rate limiter node.
+2.  The rate limiter node checks the request count for the client in Redis.
+3.  If the request count is within the limit, the node increments the count and allows the request.
+4.  If the request count exceeds the limit, the node returns an error response.
+
+### 3. Synchronization
+
+*   To ensure consistency across nodes, we use a distributed lock (e.g., Redlock) to synchronize access to Redis.
+
+### 4. Cleanup
+
+*   We use a background task to periodically clean up expired request counts.
+
+Example Code (Python)
+--------------------
+
+```python
+import redis
+from datetime import timedelta
+
+class RateLimiter:
+    def __init__(self, redis_client, limit, period):
+        self.redis_client = redis_client
+        self.limit = limit
+        self.period = period
+
+    def is_allowed(self, client_id):
+        key = f"rate_limit:{client_id}"
+        now = int(timedelta(seconds=self.period).total_seconds())
+
+        # Get the current request count and timestamp
+        count, timestamp = self.redis_client.get(key).decode().split(",") if self.redis_client.exists(key) else (0, 0)
+
+        # If the timestamp is older than the period, reset the count
+        if timestamp and int(timestamp) < now:
+            self.redis_client.set(key, f"1,{now}")
+            return True
+
+        # If the count is within the limit, increment the count
+        if int(count) < self.limit:
+            self.redis_client.incr(key)
+            self.redis_client.expire(key, self.period)
+            return True
+
+        # If the count exceeds the limit, return False
+        return False
+
+# Create a Redis client
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
+
+# Create a rate limiter with a limit of 10 requests per minute
+rate_limiter = RateLimiter(redis_client, 10, 60)
+
+# Check if a request is allowed
+client_id = "192.168.1.100"
+if rate_limiter.is_allowed(client_id):
+    print("Request allowed")
+else:
+    print("Request denied")
+```
