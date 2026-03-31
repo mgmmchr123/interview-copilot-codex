@@ -430,13 +430,17 @@ class CopilotWindow:
             datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3],
             len(prompt),
         )
-        self._start_llm_request(prompt, images_b64=images_b64, force_follow_up=True)
+        prompt = (
+            prompt
+            + "\n\n[This is a follow-up to the previous answer. "
+            "Treat this as FOLLOW_UP type.]"
+        )
+        self._start_llm_request(prompt, images_b64=images_b64)
 
     def _start_llm_request(
         self,
         prompt: str,
         images_b64: list[str] | None = None,
-        force_follow_up: bool = False,
     ) -> None:
         request_id = self._start_new_request()
         mode = self.orchestrator.default_mode
@@ -445,7 +449,6 @@ class CopilotWindow:
         self.orchestrator.request_answer(
             prompt=prompt,
             mode=mode,
-            force_qtype="follow_up" if force_follow_up else None,
             images_b64=attached_images_b64,
             on_chunk=lambda text, rid=request_id: self._enqueue("chunk", rid, text),
             on_complete=lambda rid=request_id: self._enqueue("complete", rid, ""),
@@ -459,7 +462,7 @@ class CopilotWindow:
         self._llm_state = "generating"
         self._request_started_at = perf_counter()
         self._has_streamed_content = False
-        self._user_at_bottom = True
+        self._user_at_bottom = False
         logger.info(
             "LLM request start timestamp: %s (request_id=%s)",
             datetime.now().isoformat(timespec="milliseconds"),
@@ -602,8 +605,6 @@ class CopilotWindow:
     def _append_output(self, text: str) -> None:
         self.output.config(state=tk.NORMAL)
         self.output.insert(tk.END, text)
-        if self._user_at_bottom:
-            self.output.see(tk.END)
         self.output.config(state=tk.DISABLED)
 
     def _on_output_scroll(self, first: str, last: str) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Iterator
 from time import perf_counter
@@ -8,6 +9,9 @@ from time import perf_counter
 import requests
 
 from config import AppConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 class LlmClient:
@@ -35,9 +39,17 @@ class LlmClient:
         history: list[dict] | None = None,
         images_b64: list[str] | None = None,
         model: str | None = None,
+        max_tokens: int = 400,
     ) -> Iterator[str]:
         if self.provider == "openai":
-            yield from self._stream_openai(prompt, system, history, images_b64, model)
+            yield from self._stream_openai(
+                prompt,
+                system,
+                history,
+                images_b64,
+                model,
+                max_tokens,
+            )
             return
         yield from self._stream_ollama(f"{system}\n\n{prompt}" if system else prompt)
 
@@ -100,6 +112,7 @@ class LlmClient:
         history: list[dict] | None = None,
         images_b64: list[str] | None = None,
         model: str | None = None,
+        max_tokens: int = 400,
     ) -> Iterator[str]:
         import openai
 
@@ -140,9 +153,19 @@ class LlmClient:
                 model=selected_model,
                 messages=messages,
                 stream=True,
-                max_tokens=400,
+                max_tokens=max_tokens,
+                stream_options={"include_usage": True},
             )
             for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    logger.info(
+                        "OpenAI usage: completion_tokens=%s total_tokens=%s",
+                        getattr(usage, "completion_tokens", None),
+                        getattr(usage, "total_tokens", None),
+                    )
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta.content
                 if delta:
                     self._debug_log("yield_chunk", f"chars={len(delta)} text={delta!r}")
