@@ -40,6 +40,7 @@ class LlmClient:
         images_b64: list[str] | None = None,
         model: str | None = None,
         max_tokens: int = 400,
+        stop: list[str] | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         timeout: float | None = None,
@@ -51,6 +52,7 @@ class LlmClient:
             images_b64,
             model,
             max_tokens,
+            stop,
             api_key,
             base_url,
             timeout,
@@ -140,6 +142,7 @@ class LlmClient:
         images_b64: list[str] | None = None,
         model: str | None = None,
         max_tokens: int = 400,
+        stop: list[str] | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         timeout: float | None = None,
@@ -175,12 +178,17 @@ class LlmClient:
         messages = self._build_messages(prompt, system, history, images_b64)
 
         try:
+            request_kwargs: dict[str, object] = {
+                "model": selected_model,
+                "messages": messages,
+                "stream": True,
+                "max_tokens": max_tokens,
+                "stream_options": {"include_usage": True},
+            }
+            if stop is not None:
+                request_kwargs["stop"] = stop
             stream = client.chat.completions.create(
-                model=selected_model,
-                messages=messages,
-                stream=True,
-                max_tokens=max_tokens,
-                stream_options={"include_usage": True},
+                **request_kwargs,
             )
             final_usage = None
             for chunk in stream:
@@ -189,6 +197,9 @@ class LlmClient:
                     final_usage = usage
                 if not chunk.choices:
                     continue
+                if self.debug_stream:
+                    delta_obj = chunk.choices[0].delta
+                    print(f"[chunk-debug] delta={delta_obj!r}")
                 delta = chunk.choices[0].delta.content
                 if delta:
                     self._debug_log("yield_chunk", f"chars={len(delta)} text={delta!r}")

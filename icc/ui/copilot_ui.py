@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import queue
@@ -37,6 +38,7 @@ CAMERA_DIALOG_X_OFFSET = 120
 CAMERA_DIALOG_BUTTON_TOP_PAD = 80
 DEFAULT_CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "1920"))
 DEFAULT_CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "1080"))
+ANSWER_AREA_EXTRA_HEIGHT_PX = 40
 
 
 class CameraCaptureDialog:
@@ -203,12 +205,18 @@ class CopilotWindow:
         self._request_started_at: float | None = None
         self._next_request_id = 0
         self._active_request_id: int | None = None
+        self._asyncio_loop = asyncio.new_event_loop()
+        self._asyncio_thread = Thread(target=self._run_asyncio_loop, daemon=True)
+        self._asyncio_thread.start()
         self._stt_state = "idle"
         self._llm_state = "idle"
         self._latest_transcript_text = ""
         self.in_coding_session = False
         self._pre_request_output_text = ""
         self._pre_request_was_coding_session = False
+        self._first_token_received: dict[int, bool] = {}
+        self._full_response_by_request: dict[int, str] = {}
+        self._thinking_timeout_tasks: dict[int, asyncio.Task[None]] = {}
         self.captured_images_b64: list[str] = []
         self.captured_image_paths: list[str] = []
         self._captured_thumbnail_photos: list[ImageTk.PhotoImage] = []
@@ -218,7 +226,7 @@ class CopilotWindow:
         self.root = tk.Tk()
         self.root.title(config.window_title)
         width, height = self._parse_window_size(config.window_geometry)
-        self._center_window(width, height)
+        self._center_window(width, height + ANSWER_AREA_EXTRA_HEIGHT_PX)
         self.root.attributes("-topmost", True)
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -234,7 +242,7 @@ class CopilotWindow:
         self._user_at_bottom = True
         self._last_chunk_request_id: int | None = None
         self._last_chunk_payload = ""
-        self.answer_mode_var = tk.StringVar(value="Standard")
+        self.answer_mode_var = tk.StringVar(value="Grounded Senior (FINRA-grounded, defend-ready)")
         self.prompt_input = scrolledtext.ScrolledText(
             self.prompt_frame,
             wrap=tk.WORD,
@@ -321,11 +329,17 @@ class CopilotWindow:
     def run(self) -> None:
         self.root.mainloop()
 
+    def _run_asyncio_loop(self) -> None:
+        asyncio.set_event_loop(self._asyncio_loop)
+        self._asyncio_loop.run_forever()
+
     def _on_close(self) -> None:
+        self._cancel_all_thinking_timeouts()
         if self._camera_dialog is not None and self._camera_dialog.window.winfo_exists():
             self._camera_dialog._cleanup()
             self._camera_dialog.window.destroy()
             self._camera_dialog = None
+        self._asyncio_loop.call_soon_threadsafe(self._asyncio_loop.stop)
         self.camera_manager.release()
         self.root.destroy()
 
@@ -489,7 +503,7 @@ class CopilotWindow:
                 else "standard"
             ),
             on_chunk=lambda text, rid=request_id: self._enqueue("chunk", rid, text),
-            on_complete=lambda rid=request_id: self._enqueue("complete", rid, ""),
+            on_complete=lambda text, rid=request_id: self._enqueue("complete", rid, text),
             on_error=lambda message, rid=request_id: self._enqueue("error", rid, message),
         )
 
@@ -503,8 +517,11 @@ class CopilotWindow:
         self._user_at_bottom = False
         self._last_chunk_request_id = request_id
         self._last_chunk_payload = ""
+        self._first_token_received[request_id] = False
+        self._full_response_by_request[request_id] = ""
         self._pre_request_output_text = self._current_output_text()
         self._pre_request_was_coding_session = self.in_coding_session
+        self._schedule_thinking_timeout(request_id)
         logger.info(
             "LLM request start timestamp: %s (request_id=%s)",
             datetime.now().isoformat(timespec="milliseconds"),
@@ -538,6 +555,64 @@ class CopilotWindow:
     def _enqueue(self, kind: str, request_id: int, payload: str) -> None:
         self._debug_log("queue_put", f"kind={kind} request_id={request_id} chars={len(payload)}")
         self.message_queue.put((kind, request_id, payload))
+
+    def show_full_response(self, text: str) -> None:
+        if not self._has_streamed_content:
+            self._prepare_output_for_new_answer()
+        if text:
+            self._append_output(text)
+            self._has_streamed_content = True
+
+    def _schedule_thinking_timeout(self, request_id: int) -> None:
+        def schedule() -> None:
+            self._thinking_timeout_tasks[request_id] = asyncio.create_task(
+                self._thinking_timeout(request_id)
+            )
+
+        self._asyncio_loop.call_soon_threadsafe(schedule)
+
+    async def _thinking_timeout(self, request_id: int) -> None:
+        try:
+            await asyncio.sleep(3)
+            self._enqueue("thinking_timeout", request_id, "")
+        except asyncio.CancelledError:
+            return
+
+    def _cancel_thinking_timeout(self, request_id: int) -> None:
+        task = self._thinking_timeout_tasks.pop(request_id, None)
+        if task is None:
+            return
+        self._asyncio_loop.call_soon_threadsafe(task.cancel)
+
+    def _cancel_all_thinking_timeouts(self) -> None:
+        for request_id in list(self._thinking_timeout_tasks):
+            self._cancel_thinking_timeout(request_id)
+
+    def _cleanup_request_state(self, request_id: int) -> None:
+        self._cancel_thinking_timeout(request_id)
+        self._first_token_received.pop(request_id, None)
+        self._full_response_by_request.pop(request_id, None)
+
+    def _handle_silent_failure(self, request_id: int, full_text: str) -> None:
+        warning = (
+            "WARNING: streaming silent failure detected, "
+            f"falling back to full response (request_id={request_id})"
+        )
+        logger.warning(warning)
+        self.orchestrator.log_session_warning(warning)
+        self.show_full_response(full_text)
+
+    def _finish_request_ui(self, request_id: int) -> None:
+        if request_id == self._active_request_id:
+            self._active_request_id = None
+            self._llm_state = "idle"
+            self._last_chunk_request_id = None
+            self._last_chunk_payload = ""
+            self._pre_request_output_text = ""
+            self._pre_request_was_coding_session = False
+            self._clear_transcript()
+            self._update_controls()
+        self._cleanup_request_state(request_id)
 
     def _watch_stt_start_timeout(self) -> None:
         provider = getattr(self.stt_controller, "provider", None)
@@ -601,6 +676,29 @@ class CopilotWindow:
                 self.output.see("1.0")
                 continue
 
+            if kind == "complete":
+                self._debug_log("render_complete", f"request_id={request_id} done")
+                full_text = payload
+                if request_id == self._active_request_id:
+                    if not self._first_token_received.get(request_id, False):
+                        self._handle_silent_failure(request_id, full_text)
+                    self._finish_request_ui(request_id)
+                else:
+                    self._cleanup_request_state(request_id)
+                continue
+
+            if kind == "thinking_timeout":
+                if (
+                    request_id == self._active_request_id
+                    and not self._first_token_received.get(request_id, False)
+                ):
+                    self._handle_silent_failure(
+                        request_id,
+                        self._full_response_by_request.get(request_id, ""),
+                    )
+                    self._finish_request_ui(request_id)
+                continue
+
             if request_id != self._active_request_id:
                 self._debug_log(
                     "drop_stale",
@@ -626,34 +724,21 @@ class CopilotWindow:
                         datetime.now().isoformat(timespec="milliseconds"),
                         request_id,
                     )
+                    self._cancel_thinking_timeout(request_id)
                     self._prepare_output_for_new_answer()
+                self._full_response_by_request[request_id] = (
+                    self._full_response_by_request.get(request_id, "") + payload
+                )
                 self._append_output(payload)
                 self._has_streamed_content = True
+                self._first_token_received[request_id] = True
                 self._last_chunk_request_id = request_id
                 self._last_chunk_payload = payload
-                if self.in_coding_session:
-                    self.output.see(tk.END)
-            elif kind == "complete":
-                self._debug_log("render_complete", f"request_id={request_id} done")
-                self._active_request_id = None
-                self._llm_state = "idle"
-                self._last_chunk_request_id = None
-                self._last_chunk_payload = ""
-                self._pre_request_output_text = ""
-                self._pre_request_was_coding_session = False
-                self._clear_transcript()
-                self._update_controls()
             elif kind == "error":
                 self._debug_log("render_error", f"request_id={request_id} chars={len(payload)}")
-                self._active_request_id = None
-                self._llm_state = "idle"
-                self._last_chunk_request_id = None
-                self._last_chunk_payload = ""
-                self._pre_request_output_text = ""
-                self._pre_request_was_coding_session = False
+                self._finish_request_ui(request_id)
                 self._replace_output(payload)
                 self.output.see("1.0")
-                self._update_controls()
 
         self.root.after(QUEUE_POLL_MS, self._drain_queue)
 
@@ -694,7 +779,8 @@ class CopilotWindow:
             separator = f"--- {datetime.now().strftime('%H:%M:%S')} ---"
             new_text = f"{existing_text}\n\n{separator}\n" if existing_text else f"{separator}\n"
             self._replace_output(new_text)
-            self.output.see(tk.END)
+            separator_line = max(1, int(self.output.index("end-1c").split(".")[0]) - 1)
+            self.output.see(f"{separator_line}.0")
             return
 
         self.in_coding_session = False

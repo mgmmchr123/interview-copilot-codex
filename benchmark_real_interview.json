@@ -1,0 +1,82 @@
+{
+  "per_run_results": [
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "real_interview",
+      "run": 1,
+      "ttft_ms": 886.44,
+      "total_time_ms": 886.44,
+      "prompt_tokens": 1857,
+      "completion_tokens": 200,
+      "total_tokens": 2057
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "real_interview",
+      "run": 2,
+      "ttft_ms": 638.23,
+      "total_time_ms": 638.23,
+      "prompt_tokens": 1857,
+      "completion_tokens": 200,
+      "total_tokens": 2057
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "real_interview",
+      "run": 3,
+      "ttft_ms": 603.87,
+      "total_time_ms": 603.87,
+      "prompt_tokens": 1857,
+      "completion_tokens": 200,
+      "total_tokens": 2057
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "real_interview",
+      "run": 1,
+      "ttft_ms": 1217.33,
+      "total_time_ms": 3702.84,
+      "prompt_tokens": 1794,
+      "completion_tokens": 197,
+      "total_tokens": 1991
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "real_interview",
+      "run": 2,
+      "ttft_ms": 553.58,
+      "total_time_ms": 2669.5,
+      "prompt_tokens": 1794,
+      "completion_tokens": 200,
+      "total_tokens": 1994
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "real_interview",
+      "run": 3,
+      "ttft_ms": 507.17,
+      "total_time_ms": 3104.76,
+      "prompt_tokens": 1794,
+      "completion_tokens": 200,
+      "total_tokens": 1994
+    }
+  ],
+  "summary": [
+    {
+      "model": "openai/gpt-oss-120b",
+      "scenario": "real_interview",
+      "ttft_median_ms": 638.23,
+      "total_time_median_ms": 638.23,
+      "prompt_tokens_median": 1857,
+      "total_tokens_median": 2057
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "scenario": "real_interview",
+      "ttft_median_ms": 553.58,
+      "total_time_median_ms": 3104.76,
+      "prompt_tokens_median": 1794,
+      "total_tokens_median": 1994
+    }
+  ]
+}

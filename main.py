@@ -56,6 +56,7 @@ def main() -> None:
     try:
         app.run()
     finally:
+        orchestrator.shutdown()
         camera_manager.release()
 
 
