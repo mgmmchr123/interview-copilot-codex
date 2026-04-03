@@ -1,0 +1,79 @@
+{
+  "interview_context": "high_bar_fintech",
+  "name": "Jiaxin (Jerry) Qian",
+  "title": "Senior Backend Engineer",
+  "contact": {
+    "location": "New York, NY",
+    "phone": "646-410-5122",
+    "email": "jerryqian99@gmail.com",
+    "linkedin": "linkedin.com/in/jerry-jiaxin-qian-442912286"
+  },
+  "summary": "Senior Backend Engineer with 8+ years of experience building high-throughput, cloud-native microservices in Java. Deep expertise in Spring Boot and event-driven architectures (Kafka / RabbitMQ), with hands-on AWS production experience and working familiarity with Google Cloud Platform services. Proven track record designing scalable, testable backend systems in fast-moving financial environments — including regulatory data platforms processing millions of transactions daily. Thrives in collaborative, high-ownership cultures; experienced mentoring engineers and partnering directly with product and engineering leadership to ship impactful features reliably.",
+  "experience": [
+    {
+      "company": "FINRA",
+      "title": "Senior Backend Engineer (Contract)",
+      "location": "New York, NY",
+      "duration": "Jul 2022 - Present",
+      "bullets": [
+        "Designed and delivered cloud-hosted Java Spring Boot microservices supporting high-volume regulatory data workflows — processing millions of financial transactions daily with strict consistency and reliability requirements.",
+        "Architected idempotent, retry-safe REST APIs and distributed transaction flows on AWS (EC2, RDS, S3), directly mirroring the resilient, scalable backend patterns required for a high-growth fintech rewards platform.",
+        "Drove CI/CD pipeline improvements (Jenkins / Git) and Infrastructure-as-Code practices, reducing deployment cycle time and strengthening release reliability across multiple service environments.",
+        "Integrated Kafka event-driven messaging to decouple processing pipelines, improving throughput and fault tolerance — applicable to real-time points accrual and rewards processing at scale.",
+        "Reduced API latency by 30% through Oracle query optimization and backend service refactoring, directly improving end-user responsiveness.",
+        "Built comprehensive automated test suites (JUnit — integration and performance), maintaining high code quality and confidence in a compliance-critical environment.",
+        "Mentored junior and mid-level engineers through code reviews, pairing sessions, and architecture walkthroughs; collaborated closely with product owners and engineering leadership on roadmap delivery.",
+        "Implemented structured observability (Splunk / Prometheus) for proactive production monitoring, alerting, and incident response."
+      ]
+    },
+    {
+      "company": "Della Auto Group",
+      "title": "Backend Engineer",
+      "location": "New York, NY",
+      "duration": "Jan 2021 - Jun 2022",
+      "bullets": [
+        "Built Java Spring Boot microservices and REST APIs supporting operational business workflows and internal applications, with a focus on reliability and test coverage.",
+        "Automated release pipelines and designed backend integrations for secure, cross-system data exchange — reducing manual release effort by ~60% and improving deployment consistency.",
+        "Mentored engineers on CI/CD best practices and automated tooling; contributed to Agile ceremonies that increased sprint velocity and cross-team transparency."
+      ]
+    },
+    {
+      "company": "Copolo Travel",
+      "title": "Java Software Engineer",
+      "location": "New York, NY",
+      "duration": "Aug 2019 - Dec 2020",
+      "bullets": [
+        "Developed high-throughput backend APIs for transactional reservation processing using Java and asynchronous messaging patterns (RabbitMQ) — experience directly transferable to rewards points and payments processing.",
+        "Designed distributed validation logic ensuring transactional consistency and data integrity across backend services under high concurrency."
+      ]
+    },
+    {
+      "company": "Hudson Insurance Group",
+      "title": "Java Backend Developer",
+      "location": "Nyack, NY",
+      "duration": "Mar 2017 - Jul 2019",
+      "bullets": [
+        "Built enterprise Java / Spring MVC backend services for regulated policy management platforms, gaining early experience with compliance-driven data integrity requirements.",
+        "Grew automated test coverage from 15% to 75% (JUnit), significantly reducing production defects and improving long-term maintainability.",
+        "Performed backend performance tuning across legacy services, improving throughput for high-frequency data workloads."
+      ]
+    }
+  ],
+  "skills": {
+    "languages": ["Java (Expert)", "Python", "TypeScript", "SQL"],
+    "frameworks": ["Spring Boot", "Spring MVC", "Hibernate", "Lombok", "JUnit", "Quarkus (familiar)"],
+    "messaging": ["Apache Kafka", "RabbitMQ"],
+    "databases": ["Oracle (Advanced)", "PostgreSQL", "MySQL"],
+    "cloud": ["AWS EC2", "AWS RDS", "AWS S3", "GCP GCS", "GCP Cloud Run", "GCP Pub/Sub", "Docker"],
+    "devops": ["Jenkins", "Git", "Infrastructure as Code", "Ansible (familiar)"],
+    "observability": ["Splunk", "Prometheus"],
+    "practices": ["Agile / Scrum", "Code reviews", "Mentoring", "Performance tuning", "Automated testing", "Full SDLC"]
+  },
+  "education": [
+    {
+      "school": "Queens College, City University of New York",
+      "degree": "Bachelor of Science in Computer Science",
+      "year": "2017"
+    }
+  ]
+}

@@ -24,6 +24,11 @@ def main() -> None:
         default="default",
         help="Resume name to load from resumes/ directory (without .json)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode (prints classifier raw output, etc.)",
+    )
     args = parser.parse_args()
     config = AppConfig.from_env()
     check_deepgram_balance(
@@ -33,7 +38,7 @@ def main() -> None:
     camera_manager = CameraManager(config.camera_index)
     Thread(target=camera_manager.warmup, daemon=True).start()
     llm_client = LlmClient(config=config)
-    orchestrator = InterviewOrchestrator(llm_client=llm_client)
+    orchestrator = InterviewOrchestrator(llm_client=llm_client, debug_mode=args.debug)
     resume_path = f"resumes/{args.resume}.json"
     if os.path.exists(resume_path):
         orchestrator.load_resume(resume_path)

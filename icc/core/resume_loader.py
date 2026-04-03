@@ -1,13 +1,51 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
+
+DEFAULT_INTERVIEW_CONTEXT = "growth_tech"
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeProfile:
+    filename: str
+    company_name: str
+    formatted_resume: str
+    interview_context: str
 
 
 def load_resume(path: str) -> str:
     """Load a resume JSON file and return formatted plain text."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return format_resume(data)
+    return load_resume_profile(path).formatted_resume
+
+
+def load_resume_profile(path: str) -> ResumeProfile:
+    """Load a resume JSON file and return resume text plus interview context."""
+    resume_path = Path(path)
+    data = json.loads(resume_path.read_text(encoding="utf-8"))
+    interview_context = str(
+        data.get("interview_context", DEFAULT_INTERVIEW_CONTEXT)
+    ).strip() or DEFAULT_INTERVIEW_CONTEXT
+    return ResumeProfile(
+        filename=resume_path.name,
+        company_name=_resume_company_name_from_filename(resume_path.stem),
+        formatted_resume=format_resume(data),
+        interview_context=interview_context,
+    )
+
+
+def _resume_company_name_from_filename(stem: str) -> str:
+    normalized = stem.strip().lower()
+    overrides = {
+        "betterment": "Betterment",
+        "bilt": "Bilt",
+        "mta": "MTA",
+        "default": "Default",
+    }
+    if normalized in overrides:
+        return overrides[normalized]
+    return stem.replace("_", " ").replace("-", " ").strip().title() or "Unknown"
 
 
 def format_resume(data: dict) -> str:

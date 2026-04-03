@@ -20,6 +20,10 @@ class LlmClient:
         self.provider = config.llm_provider
         self.debug_stream = os.getenv("ICC_DEBUG_STREAM", "").strip() == "1"
         self._stream_started_at: float | None = None
+        self._last_stream_model: str | None = None
+        self._last_stream_chunk_count = 0
+        self._last_stream_exception_type: str | None = None
+        self._last_stream_exception_message: str | None = None
 
     def _debug_log(self, stage: str, detail: str) -> None:
         if not self.debug_stream:
@@ -150,6 +154,10 @@ class LlmClient:
         import openai
 
         selected_model = model or self.config.openai_model
+        self._last_stream_model = selected_model
+        self._last_stream_chunk_count = 0
+        self._last_stream_exception_type = None
+        self._last_stream_exception_message = None
         self._stream_started_at = perf_counter()
         self._debug_log(
             "request_start",
@@ -192,6 +200,7 @@ class LlmClient:
             )
             final_usage = None
             for chunk in stream:
+                self._last_stream_chunk_count += 1
                 usage = getattr(chunk, "usage", None)
                 if usage is not None:
                     final_usage = usage
@@ -200,10 +209,10 @@ class LlmClient:
                 if self.debug_stream:
                     delta_obj = chunk.choices[0].delta
                     print(f"[chunk-debug] delta={delta_obj!r}")
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    self._debug_log("yield_chunk", f"chars={len(delta)} text={delta!r}")
-                    yield delta
+                content = chunk.choices[0].delta.content
+                if content is not None and content != "":
+                    self._debug_log("yield_chunk", f"chars={len(content)} text={content!r}")
+                    yield content
             if final_usage is not None:
                 logger.info(
                     "OpenAI usage: completion_tokens=%s total_tokens=%s",
@@ -211,6 +220,8 @@ class LlmClient:
                     getattr(final_usage, "total_tokens", None),
                 )
         except openai.OpenAIError as exc:
+            self._last_stream_exception_type = type(exc).__name__
+            self._last_stream_exception_message = str(exc)
             raise RuntimeError(f"OpenAI error: {exc}") from exc
 
     def _stream_openai_responses(
@@ -226,6 +237,10 @@ class LlmClient:
         import openai
 
         response_input = self._build_responses_input(prompt, history, images_b64)
+        self._last_stream_model = model
+        self._last_stream_chunk_count = 0
+        self._last_stream_exception_type = None
+        self._last_stream_exception_message = None
 
         try:
             stream = client.responses.create(
@@ -237,6 +252,7 @@ class LlmClient:
             )
             final_usage = None
             for event in stream:
+                self._last_stream_chunk_count += 1
                 if getattr(event, "type", "") == "response.output_text.delta":
                     delta = getattr(event, "delta", "")
                     if delta:
@@ -251,6 +267,8 @@ class LlmClient:
                     getattr(final_usage, "total_tokens", None),
                 )
         except openai.OpenAIError as exc:
+            self._last_stream_exception_type = type(exc).__name__
+            self._last_stream_exception_message = str(exc)
             raise RuntimeError(f"OpenAI error: {exc}") from exc
 
     def _complete_openai(

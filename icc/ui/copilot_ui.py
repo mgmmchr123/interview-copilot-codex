@@ -242,7 +242,7 @@ class CopilotWindow:
         self._user_at_bottom = True
         self._last_chunk_request_id: int | None = None
         self._last_chunk_payload = ""
-        self.answer_mode_var = tk.StringVar(value="Grounded Senior (FINRA-grounded, defend-ready)")
+        self.fsm_enabled = False
         self.prompt_input = scrolledtext.ScrolledText(
             self.prompt_frame,
             wrap=tk.WORD,
@@ -277,21 +277,15 @@ class CopilotWindow:
             padx=6,
             pady=3,
         )
-        self.mode_label = tk.Label(
+        self.fsm_button = tk.Button(
             self.mode_frame,
-            text="Mode",
-            font=(UI_FONT_FAMILY, 9),
-        )
-        self.answer_mode = tk.OptionMenu(
-            self.mode_frame,
-            self.answer_mode_var,
-            "Standard",
-            "Senior (Trade-offs + Failure modes)",
-            "Grounded Senior (FINRA-grounded, defend-ready)",
-        )
-        self.answer_mode.config(
+            text="FSM: OFF",
+            command=self._toggle_fsm,
             width=8,
             font=(UI_FONT_FAMILY, 9),
+            bg="grey",
+            padx=6,
+            pady=3,
         )
         self.follow_up_button = tk.Button(
             self.button_row_top,
@@ -359,8 +353,8 @@ class CopilotWindow:
         self.screenshot_button.pack(side=tk.LEFT, padx=4)
         self.new_topic_button.pack(side=tk.LEFT, padx=4)
         self.mode_frame.pack(side=tk.LEFT, padx=4)
-        self.mode_label.pack(side=tk.LEFT, padx=(0, 4))
-        self.answer_mode.pack(side=tk.LEFT)
+        self.fsm_button.pack(side=tk.LEFT)
+        print("[UI INIT] mode_frame children:", [w for w in self.mode_frame.winfo_children()])
         self.prompt_input.insert("1.0", self.orchestrator.default_prompt)
         self._replace_output("Ready")
         self.output.see("1.0")
@@ -482,6 +476,13 @@ class CopilotWindow:
         )
         self._start_llm_request(prompt, images_b64=images_b64)
 
+    def _toggle_fsm(self) -> None:
+        self.fsm_enabled = not self.fsm_enabled
+        if self.fsm_enabled:
+            self.fsm_button.config(text="FSM: ON", bg="green")
+        else:
+            self.fsm_button.config(text="FSM: OFF", bg="grey")
+
     def _start_llm_request(
         self,
         prompt: str,
@@ -495,13 +496,8 @@ class CopilotWindow:
             prompt=prompt,
             mode=mode,
             images_b64=attached_images_b64,
-            answer_mode=(
-                "grounded_senior"
-                if "Grounded Senior" in self.answer_mode_var.get()
-                else "senior"
-                if "Senior" in self.answer_mode_var.get()
-                else "standard"
-            ),
+            answer_mode="grounded_senior",
+            fsm_enabled=self.fsm_enabled,
             on_chunk=lambda text, rid=request_id: self._enqueue("chunk", rid, text),
             on_complete=lambda text, rid=request_id: self._enqueue("complete", rid, text),
             on_error=lambda message, rid=request_id: self._enqueue("error", rid, message),
@@ -564,12 +560,7 @@ class CopilotWindow:
             self._has_streamed_content = True
 
     def _schedule_thinking_timeout(self, request_id: int) -> None:
-        def schedule() -> None:
-            self._thinking_timeout_tasks[request_id] = asyncio.create_task(
-                self._thinking_timeout(request_id)
-            )
-
-        self._asyncio_loop.call_soon_threadsafe(schedule)
+        self._debug_log("thinking_timeout_disabled", f"request_id={request_id}")
 
     async def _thinking_timeout(self, request_id: int) -> None:
         try:
@@ -594,6 +585,17 @@ class CopilotWindow:
         self._full_response_by_request.pop(request_id, None)
 
     def _handle_silent_failure(self, request_id: int, full_text: str) -> None:
+        if not full_text or not full_text.strip():
+            # Intentional skip (e.g. terminal phase early-exit): no warning, no output wipe.
+            return
+        llm_client = self.orchestrator.llm_client
+        logger.debug(
+            "silent_failure_diagnostics: exception_type=%s exception_message=%r chunks_received=%s model=%s",
+            getattr(llm_client, "_last_stream_exception_type", None),
+            getattr(llm_client, "_last_stream_exception_message", None),
+            getattr(llm_client, "_last_stream_chunk_count", None),
+            getattr(llm_client, "_last_stream_model", None),
+        )
         warning = (
             "WARNING: streaming silent failure detected, "
             f"falling back to full response (request_id={request_id})"
@@ -692,11 +694,14 @@ class CopilotWindow:
                     request_id == self._active_request_id
                     and not self._first_token_received.get(request_id, False)
                 ):
-                    self._handle_silent_failure(
-                        request_id,
-                        self._full_response_by_request.get(request_id, ""),
+                    self._debug_log(
+                        "thinking_timeout",
+                        (
+                            f"thinking_timeout fired after 3000ms, "
+                            f"chunks_received={getattr(self.orchestrator.llm_client, '_last_stream_chunk_count', 0)}, "
+                            "will continue waiting"
+                        ),
                     )
-                    self._finish_request_ui(request_id)
                 continue
 
             if request_id != self._active_request_id:
@@ -823,7 +828,7 @@ class CopilotWindow:
         else:
             elapsed_ms = (perf_counter() - self._request_started_at) * 1000
 
-        print(f"[stream-debug][ui][{elapsed_ms:8.1f} ms] {stage}: {detail}")
+        # print(f"[stream-debug][ui][{elapsed_ms:8.1f} ms] {stage}: {detail}")
 
     def _on_camera_capture_complete(self, image: Image.Image) -> None:
         self._camera_dialog = None
