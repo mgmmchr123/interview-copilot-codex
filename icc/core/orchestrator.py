@@ -26,6 +26,65 @@ TYPE_MAX_TOKENS = {
     "CODING": 900,
 }
 CLASSIFIER_MODEL = "llama-3.1-8b-instant"
+TYPE_CODE_MAP = {
+    "BE": "BEHAVIORAL",
+    "CO": "CODING",
+    "CB": "CONCEPTUAL",
+    "DD": "DEEP_DIVE",
+    "DS": "DEBUGGING_SCENARIO",
+    "FU": "FOLLOW_UP",
+    "SD": "SYSTEM_DESIGN",
+}
+DEPTH_CODE_MAP = {
+    "B": "basic",
+    "P": "practical",
+    "D": "deep",
+}
+VALID_DEPTHS = {"basic", "practical", "deep"}
+TYPE_PATTERN = re.compile(
+    r'\[(?:T|TYPES?)\s*:\s*([A-Z_]+)',
+    re.IGNORECASE,
+)
+DEPTH_PATTERN = re.compile(
+    r'\[(?:D|DEPTH)\s*:\s*(basic|practical|deep|[BPD])\b'
+    r'|\b(DEEP|PRACTICAL|BASIC)\b(?!\s*_)',
+    re.IGNORECASE,
+)
+CLASSIFIER_PROMPT = """You are a question classifier.
+Respond with EXACTLY two tags and nothing else.
+Format: [T:XX] [D:Y]
+
+Do NOT output explanations.
+Do NOT output full words like BEHAVIORAL or CONCEPTUAL.
+Do NOT use [TYPE:...] or [DEPTH:...] format.
+Output ONLY the two tags on a single line.
+
+TYPE codes:
+  BE = BEHAVIORAL
+  CO = CODING
+  CB = CONCEPTUAL (will be routed to BASIC or DEEP based on DEPTH)
+  DD = DEEP_DIVE
+  DS = DEBUGGING_SCENARIO
+  FU = FOLLOW_UP
+  SD = SYSTEM_DESIGN
+
+DEPTH codes:
+  B = basic (what is X, define X)
+  P = practical (how do you handle X, how do you implement X, how would you)
+  D = deep (design a system end-to-end)
+
+Rules:
+  - 'What is X' or 'Define X' → [D:B]
+  - 'How do you handle/implement X' or 'How would you' → [D:P]
+  - 'Design a system' or 'end-to-end' → [D:D]
+  - 'Tell me about a time' → [T:BE]
+  - 'Tell me about a system you built' → [T:DD] [D:P]
+  - When in doubt between B and P, choose P
+
+Example outputs:
+  [T:BE] [D:P]
+  [T:CB] [D:P]
+  [T:SD] [D:D]"""
 GROQ_HEAVY_MODEL = "openai/gpt-oss-120b"
 OPENAI_VISION_MODEL = "gpt-5.4-mini"
 OPENAI_FALLBACK_MODEL = "gpt-4.1-mini"
@@ -110,6 +169,12 @@ class InterviewOrchestrator:
         )
         self._session_log_writer.append_block(block)
 
+    def _extract_type(self, raw: str) -> str | None:
+        for qt in QUESTION_TYPES:
+            if re.search(r'\b' + qt + r'\b', raw, re.IGNORECASE):
+                return qt
+        return None
+
     def _classify_question(self, transcript: str, has_image: bool) -> str:
         if "[This is a follow-up" in transcript:
             return "FOLLOW_UP"
@@ -123,46 +188,43 @@ class InterviewOrchestrator:
             return OTHER_TYPE
 
         started_at = perf_counter()
+        print("[CLASSIFIER PROMPT]", CLASSIFIER_PROMPT)
         try:
-            raw_result = self.llm_client.complete_text(
-                system=(
-                    "Classify the interview question into exactly one category.\n"
-                    "Reply with one word only, no punctuation.\n\n"
-                    "CODING: algorithm, data structure, or implementation problem.\n"
-                    " Key signals: 'given an array/tree/list/graph', 'implement a function',\n"
-                    " 'return the result', 'find/detect/count/reverse/sort something'.\n"
-                    " These are LeetCode-style problems, NOT projects you built.\n"
-                    "SYSTEM_DESIGN: design a large-scale distributed system\n"
-                    "BEHAVIORAL: interpersonal situations, conflict, teamwork, soft skills,\n"
-                    "             how you handled people or process challenges\n"
-                    "CONCEPTUAL_BASIC: define a concept, explain how something works simply\n"
-                    "CONCEPTUAL_DEEP: explain internal mechanism, tradeoffs, production scenarios\n"
-                    "DEEP_DIVE: walk me through a system you built, an architectural decision\n"
-                    "           you made, or a technical project you owned end to end\n"
-                    "DEBUGGING_SCENARIO: a production problem that requires both diagnosis\n"
-                    " and decision-making - memory leaks, CPU spikes, error rates, outages,\n"
-                    " latency issues, or any hypothetical situation requiring immediate action.\n"
-                    "FOLLOW_UP: asking to elaborate, clarify, or continue a previous answer"
-                ),
-                prompt=(
-                    "Classify into one of the following categories:\n"
-                    "CODING, SYSTEM_DESIGN, BEHAVIORAL, CONCEPTUAL_BASIC, "
-                    "CONCEPTUAL_DEEP, DEEP_DIVE, DEBUGGING_SCENARIO, FOLLOW_UP\n\n"
-                    f"Question: {transcript}\n"
-                    f"Has image: {has_image}\n"
-                    "Category:"
-                ),
+            raw = self.llm_client.complete_text(
+                system=CLASSIFIER_PROMPT,
+                prompt=transcript,
                 model=CLASSIFIER_MODEL,
-                max_tokens=10,
+                max_tokens=20,
                 api_key=groq_api_key,
                 base_url=self.llm_client.config.groq_base_url,
                 timeout=CLASSIFIER_TIMEOUT_SECONDS,
             )
-            question_type = raw_result.strip().upper()
-            if question_type not in QUESTION_TYPES:
-                question_type = OTHER_TYPE
+            # Layer 1: robust parse (handles [T:XX], [TYPE:XX], [TYPES:XX])
+            type_match = TYPE_PATTERN.search(raw)
+            depth_match = DEPTH_PATTERN.search(raw)
+            t_code = type_match.group(1).upper() if type_match else None
+            parsed_type = TYPE_CODE_MAP[t_code] if t_code in TYPE_CODE_MAP else None
+            # Depth: bracket form (group 1) or bare-word form (group 2)
+            if depth_match:
+                val = (depth_match.group(1) or depth_match.group(2)).upper()
+                parsed_depth = DEPTH_CODE_MAP.get(val) or val.lower()
+                if parsed_depth not in VALID_DEPTHS:
+                    parsed_depth = "basic"
+            else:
+                parsed_depth = "basic"
+            # Layer 2: word boundary fallback (keep existing _extract_type)
+            if not parsed_type:
+                parsed_type = self._extract_type(raw) or "OTHER"
+            # CONCEPTUAL depth routing
+            if parsed_type == "CONCEPTUAL":
+                question_type = "CONCEPTUAL_DEEP" if parsed_depth != "basic" \
+                                else "CONCEPTUAL_BASIC"
+            else:
+                question_type = parsed_type
+            print(f"[CLASSIFIER RAW] {raw!r}")
+            print(f"[CLASSIFIER PARSED] type={question_type} depth={parsed_depth}")
             elapsed_ms = (perf_counter() - started_at) * 1000
-            logger.info("Classified as %s (%.0f ms)", question_type, elapsed_ms)
+            logger.info("Classified as %s depth=%s (%.0f ms)", question_type, parsed_depth, elapsed_ms)
             return question_type
         except RuntimeError as exc:
             logger.warning("Groq classify failed, using OTHER: %s", exc)
