@@ -76,5 +76,22 @@
       "degree": "Bachelor of Science in Computer Science",
       "year": "2017"
     }
-  ]
+  ],
+  "engineering_context": {
+    "kafka_pipeline": {
+      "why_kafka_over_rest": "The workflow had multiple long-running stages: validation, enrichment, persistence, notifications. With synchronous REST, a mid-flow failure required manual recovery. Kafka gave us durability and replay — each stage modeled as an event-driven state transition, reprocessable from offset. Also absorbed traffic spikes during bulk filing periods instead of overwhelming downstream services.",
+      "failure_handling": "Two-layer approach: local retries with exponential backoff for transient issues (DB locks, network). If retries exhausted, message routed to DLQ with error reason and original payload. Built an internal replay tool to filter DLQ messages by error type and re-publish to original topic. All consumers designed idempotent so replay was always safe.",
+      "hardest_bug": "Schema drift: producer added a new field, consumer used older deserialization model. No crash — fields silently defaulted, corrupting downstream data. Only caught through data reconciliation, not alerts. Fix: added strict schema validation at consumer boundary and enforced schema versioning to prevent silent field drops."
+    },
+    "latency_improvement": {
+      "discovery": "User complaints about slow filings triggered investigation. Checked Grafana — p95/p99 trending up, not yet alerting but degradation was clear.",
+      "root_cause": "Two issues found via request tracing: (1) N+1 query pattern fetching reference data inside a loop, (2) high-frequency query missing a composite index, causing full table scans.",
+      "fix_and_validation": "Replaced N+1 with batch query. Added composite index aligned with filter conditions. Validated using p95/p99 metrics and EXPLAIN plans to confirm index usage. Gradual rollout. Result: ~30% latency reduction with significantly more stable tail latency."
+    },
+    "idempotent_api": {
+      "key_design": "Client-provided requestId as idempotency key, server-generated fallback. Stored in PostgreSQL — either dedicated idempotency table or unique constraint on business table — within the same transaction for strong consistency.",
+      "duplicate_detection": "On request: check if key exists. If yes, return stored result. If no, insert key and process in same DB transaction. Prevents race conditions at the DB level.",
+      "failure_case": "Early implementation only enforced idempotency at API layer, not Kafka consumers. During a consumer rebalance, same message processed twice — duplicate writes. Fix: standardized idempotency across both APIs and consumers using DB-level uniqueness constraints. Retries and reprocessing guaranteed single successful write."
+    }
+  }
 }

@@ -430,6 +430,7 @@ class CopilotWindow:
         self._pre_request_output_text = ""
         self._pre_request_was_coding_session = False
         self.orchestrator.clear_history()
+        self.orchestrator.current_story = None
         self._replace_output("Ready")
         self.output.see("1.0")
         self._update_controls()

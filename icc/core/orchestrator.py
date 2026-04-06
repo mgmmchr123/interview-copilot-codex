@@ -4,13 +4,17 @@ import logging
 import os
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from threading import Thread
 from time import perf_counter
 from typing import Callable
 
 from config.interview_context import CONTEXT_PROFILES
+from icc.core.context_cards import select_cards
+from icc.core.story_bank import (
+    find_story, is_experience_followup, get_snippet, get_summary
+)
 from icc.llm.client import LlmClient
 from icc.core.session_logger import SessionLogWriter
 
@@ -87,6 +91,124 @@ DEPTH_CODE_MAP = {
     "DEEP": "deep",
 }
 VALID_DEPTHS = {"basic", "practical", "deep"}
+
+BEHAVIORAL_PATTERNS = [
+    "tell me about a time",
+    "describe a time",
+    "walk me through a time",
+    "give me an example",
+    "can you give me an example",
+    "can you walk me through",
+    "share an example",
+    "what's an example",
+    "have you ever",
+]
+
+BEHAVIORAL_VERBS = [
+    "influence", "influenced", "convince", "convinced",
+    "drive", "drove", "push", "pushed", "advocate", "advocated",
+    "disagree", "disagreed", "resolve", "resolved",
+    "conflict", "handle conflict",
+    "lead", "led", "manage", "managed",
+    "mentor", "mentored", "guide", "guided",
+    "decide", "decided", "choose", "chose",
+    "prioritize", "prioritized",
+    "fail", "failed", "mistake", "wrong",
+    "learned", "lesson",
+    "handle pressure", "multiple priorities",
+    "refuse", "refused", "resist", "resisted", "pushback", "pushed back",
+]
+
+FOLLOWUP_KEYWORDS = [
+    "what if", "how do you handle", "what happens if",
+    "how do you ensure", "crash", "failure", "retry",
+    "consistency", "still correct", "atomicity",
+    "guarantee", "ensure", "correctness", "why safe",
+]
+
+HARD_SWITCH_SIGNALS = [
+    "let's switch", "new question", "different topic",
+    "unrelated", "move on to", "tell me about",
+    "describe a time", "walk me through a time",
+    "give me an example", "different project",
+    "another system", "at your previous",
+]
+
+MAX_DEPTH = 3
+
+
+def is_followup_by_keyword(q: str) -> bool:
+    ql = q.lower()
+    return any(k in ql for k in FOLLOWUP_KEYWORDS)
+
+
+def introduces_new_topic(q: str, topic_keywords: set) -> bool:
+    ql = q.lower()
+    if any(s in ql for s in HARD_SWITCH_SIGNALS):
+        return True
+    tokens = set(w for w in ql.split() if len(w) > 4)
+    return len(tokens) > 0 and len(tokens & topic_keywords) == 0
+
+
+def is_followup_by_context(q: str, topic_keywords: set) -> bool:
+    if not topic_keywords:
+        return False  # No topic context yet — do not guess
+    tokens = q.split()
+    return len(tokens) < 20 and not introduces_new_topic(q, topic_keywords)
+
+
+def is_followup(q: str, phase_state, topic_keywords: set) -> bool:
+    # Allow keyword detection even when phase_state is None
+    if phase_state is not None and not phase_state.active:
+        return False
+    return is_followup_by_keyword(q) or is_followup_by_context(q, topic_keywords)
+
+
+def map_to_depth(q: str, current_depth: int) -> int:
+    ql = q.lower()
+    matched = []
+    if any(x in ql for x in ["ensure", "guarantee", "consistency"]):
+        matched.append(1)
+    if any(x in ql for x in ["what if", "failure", "crash", "retry"]):
+        matched.append(2)
+    if any(x in ql for x in ["still correct", "why safe", "correctness", "atomicity"]):
+        matched.append(3)
+    if not matched:
+        return min(current_depth + 1, MAX_DEPTH)
+    return min(max(current_depth, max(matched)), MAX_DEPTH)
+
+
+def build_depth_block(depth: int) -> str:
+    blocks = []
+    if depth >= 1:
+        blocks.append(
+            "GUARANTEE REQUIRED — HIGHEST PRIORITY INSTRUCTION:\n"
+            "This requirement overrides ALL other constraints, including any "
+            "instruction about not introducing new details.\n\n"
+            "Your FIRST sentence MUST be exactly in this form:\n"
+            "'I guarantee [X], but I do NOT guarantee [Y].'\n\n"
+            "You MUST explicitly state both sides:\n"
+            "- what is guaranteed\n"
+            "- what is NOT guaranteed\n\n"
+            "You are allowed to introduce standard distributed systems terms "
+            "(e.g., at-least-once, exactly-once, idempotency) even if they "
+            "are not explicitly mentioned in the story.\n\n"
+            "Do NOT skip this. Do NOT paraphrase. Do NOT delay it.\n"
+            "If this sentence is missing, the answer is invalid."
+        )
+    if depth >= 2:
+        blocks.append(
+            "FAILURE WALKTHROUGH REQUIRED: Include one concrete failure scenario. "
+            "Structure: what fails → what the system does → why it is still safe."
+        )
+    if depth >= 3:
+        blocks.append(
+            "INVARIANT PROOF REQUIRED: Explicitly state why the system remains "
+            "correct after the failure. Then name one concrete trade-off accepted "
+            "(latency, ops overhead, or debug complexity — not 'complexity increases')."
+        )
+    return "\n".join(blocks)
+
 
 CLASSIFIER_PROMPT = (
     "Classify the interview question into TYPE and DEPTH.\n\n"
@@ -286,8 +408,12 @@ class InterviewOrchestrator:
         self._session_request_id = 0
         self._session_log_writer = SessionLogWriter()
         self.current_question_type = OTHER_TYPE
+        self.root_question_type: str = OTHER_TYPE
         self.question_depth: str = "basic"
         self.phase_state: PhaseState | None = None
+        self.current_story: dict | None = None
+        self.depth_state: int = 0  # depth for current DEEP_DIVE session
+        self.topic_keywords: set = set()
 
     def _debug_log(self, stage: str, detail: str) -> None:
         if not self.debug_stream:
@@ -302,6 +428,10 @@ class InterviewOrchestrator:
 
     def clear_history(self) -> None:
         self.conversation_history = []
+        self.current_story = None
+        self.depth_state = 0
+        self.topic_keywords = set()
+        self.root_question_type = OTHER_TYPE
 
     def log_session_warning(self, message: str) -> None:
         self._session_log_writer.append_block(
@@ -722,7 +852,7 @@ class InterviewOrchestrator:
                     '- Failure mode: "This breaks when..."\n'
                     '- Alternative rejected: "I considered X but rejected it because..."\n'
                     "Tie each to a real constraint (SLA, compliance, cost, observability).\n"
-                    'The last sentence MUST be: "I\'ll pause here."\n'
+                    "Do not add a pause marker at the end.\n"
                     "Then stop.\n\n"
                     "LENGTH: Trade-off, failure mode, and alternative rejected:\n"
                     "one sentence each. One constraint per decision.\n"
@@ -744,7 +874,7 @@ class InterviewOrchestrator:
                     "Cover: the hardest engineering challenge, how correctness was validated,\n"
                     "rollout strategy, rollback plan, observability signals used,\n"
                     "and one real or hypothetical incident and how it was handled.\n"
-                    'The last sentence MUST be: "I\'ll pause here."\n'
+                    "Do not add a pause marker at the end.\n"
                     "Then stop.\n\n"
                     "LENGTH: One sentence per topic. Do not elaborate unless asked.\n"
                     "End question is one sentence. Total response must be under 100 words."
@@ -789,6 +919,47 @@ class InterviewOrchestrator:
 
         return False
 
+    def _is_behavioral(self, q: str) -> bool:
+        """Two-layer behavioral detection: prefix patterns + verb signals."""
+        q = q.lower()
+
+        # explicit refusal/resistance signals → behavioral (highest priority)
+        if any(k in q for k in ["refuse", "refused", "resist", "resisted",
+                                  "pushback", "pushed back"]):
+            return True
+
+        # Exclude clear DEEP_DIVE / SYSTEM_DESIGN signals first
+        if any(k in q for k in [
+            "design a system",
+            "how would you design",
+            "describe how you designed",
+            "describe how you built",
+            "describe how you architected",
+            "how does it work",
+        ]):
+            return False
+
+        # Layer 1: strong prefix patterns
+        if any(p in q for p in BEHAVIORAL_PATTERNS):
+            return True
+
+        # Layer 2: verb-anchored phrases + behavioral verb
+        if any(k in q for k in [
+            "describe how you",
+            "how did you",
+        ]) and any(v in q for v in BEHAVIORAL_VERBS):
+            return True
+
+        # Layer 3: hardest/most difficult + problem noun
+        if any(k in q for k in [
+            "hardest", "most difficult", "toughest", "worst"
+        ]) and any(v in q for v in [
+            "bug", "issue", "problem", "decision", "mistake"
+        ]):
+            return True
+
+        return False
+
     def _classify_question(self, transcript: str, has_image: bool) -> str:
         if "[This is a follow-up" in transcript:
             self.question_depth = "basic"
@@ -797,6 +968,13 @@ class InterviewOrchestrator:
         if has_image:
             self.question_depth = "deep"
             return "CODING"
+
+        q = transcript.lower()
+
+        # BEHAVIORAL override — two-layer pattern+verb detection
+        if self._is_behavioral(q):
+            self.question_depth = "practical"
+            return "BEHAVIORAL"
 
         groq_api_key = self.llm_client.config.groq_api_key
         if not groq_api_key:
@@ -811,7 +989,9 @@ class InterviewOrchestrator:
                     "Classify the interview question into TYPE and DEPTH.\n\n"
                     "TYPE (choose exactly one):\n"
                     "- BEHAVIORAL: interpersonal situations, conflict, teamwork, soft skills,\n"
-                    "              how you handled people or process challenges\n"
+                    "              how you handled people or process challenges;\n"
+                    "              also: past technical achievements framed as 'Tell me about\n"
+                    "              a time you...' — classify as BEHAVIORAL + practical\n"
                     "- CODING: algorithm, data structure, or implementation problem.\n"
                     "  Key signals: 'given an array/tree/list/graph', 'implement a function',\n"
                     "  'return the result', 'find/detect/count/reverse/sort something'.\n"
@@ -820,7 +1000,9 @@ class InterviewOrchestrator:
                     "              internal mechanisms, or production usage\n"
                     "- SYSTEM_DESIGN: design a large-scale distributed system end to end\n"
                     "- DEEP_DIVE: walk me through a system you built, an architectural decision\n"
-                    "             you made, or a technical project you owned end to end\n"
+                    "             you made, or a technical project you owned end to end;\n"
+                    "             also: 'Describe how you designed...', 'how did you handle X'\n"
+                    "             when asked about past work (past-tense ownership pattern)\n"
                     "- DEBUGGING_SCENARIO: a production problem requiring diagnosis and\n"
                     "  decision-making — memory leaks, CPU spikes, error rates, outages,\n"
                     "  latency issues, or any hypothetical situation requiring immediate action\n"
@@ -832,12 +1014,14 @@ class InterviewOrchestrator:
                     "Rules:\n"
                     "- 'What is X' → CONCEPTUAL + basic\n"
                     "- 'How do you handle / implement X' → CONCEPTUAL + practical\n"
-                    "- 'Design a system that does X end-to-end' → SYSTEM_DESIGN + deep\n\n"
+                    "- 'Design a system that does X end-to-end' → SYSTEM_DESIGN + deep\n"
+                    "- 'how you designed...' / 'Describe how you designed...' / past-tense ownership → DEEP_DIVE + practical\n\n"
                     "DEPTH rules:\n"
                     "- 'What is X' or 'Define X' → basic\n"
                     "- 'How do you handle X' or 'How do you implement X' → practical\n"
                     "- 'Design a system that does X end-to-end' → deep\n"
                     "- 'Tell me about a system you built' → practical\n"
+                    "- 'Tell me about a time you...' → practical (always, regardless of topic)\n"
                     "- 'Walk me through...' → practical\n"
                     "When in doubt between basic and practical, choose practical.\n\n"
                     "Output format: [TYPE:xxx] [DEPTH:yyy]\n"
@@ -903,6 +1087,7 @@ class InterviewOrchestrator:
         self,
         answer_mode: str = "grounded_senior",
         question_type: str = OTHER_TYPE,
+        depth: int = 0,
     ) -> str:
         addon = ""
         senior_addon = (
@@ -923,7 +1108,7 @@ class InterviewOrchestrator:
         example_phrase = random.choice(TRADEOFF_STYLES)
         grounded_senior_addon = (
             "GROUNDED SENIOR MODE ACTIVE.\n\n"
-            "When relevant, your answer should naturally cover:\n"
+            "Your answer MUST cover ALL of the following — no exceptions:\n"
             "- Why you chose one approach over another\n"
             "- One limitation or failure scenario specific to this design\n"
             "- A briefly mentioned alternative, if it helps clarity\n\n"
@@ -937,7 +1122,8 @@ class InterviewOrchestrator:
             "(Prometheus metrics, GC logs, slow query logs).\n\n"
             "For BEHAVIORAL: name the specific project from "
             "resume in sentence 1. Include one measurable result.\n"
-            "State one lesson or trade-off naturally — do not force it.\n\n"
+            "State one concrete trade-off: 'I chose X over Y because [specific reason].'\n"
+            "BANNED: 'worked reliably', 'ensured scalability', 'improved performance'\n\n"
             "Integrate these elements into your explanation. "
             "Do not list them as a separate section at the end.\n"
         )
@@ -955,8 +1141,43 @@ class InterviewOrchestrator:
         elif question_type == "CODING":
             addon = senior_addon
         # Build the conceptual depth instruction based on current session depth
-        if (
-            question_type in {"CONCEPTUAL_BASIC", "CONCEPTUAL_DEEP"}
+        if question_type == "CONCEPTUAL_DEEP":
+            conceptual_instruction = (
+                "Start with a clear explanation of the concept in 1-2 sentences,\n"
+                "then expand into trade-offs or implementation details.\n"
+                "Ground your answer in real-world systems where applicable,\n"
+                "but do NOT force personal experience if not directly relevant.\n"
+                "\n"
+                "You MUST include ALL of the following:\n"
+                "\n"
+                "1. TRADE-OFF (REQUIRED)\n"
+                "   'I chose X over Y because [specific technical reason]'\n"
+                "   X and Y must be concrete alternatives, not vague.\n"
+                "\n"
+                "2. FAILURE MODE (REQUIRED if relevant to the question)\n"
+                "   If the concept involves failure scenarios (e.g., retries, consistency,\n"
+                "   distributed state), you MUST include one specific failure.\n"
+                "   If the concept is purely mechanical (e.g., thread model, GC algorithm),\n"
+                "   skip this or mention briefly only if it adds clarity.\n"
+                "   Do NOT force a failure mode that does not naturally apply.\n"
+                "\n"
+                "3. MECHANISM (REQUIRED)\n"
+                "   Explain how it actually works in practice.\n"
+                "   Use concrete phrases where applicable:\n"
+                "   'State is stored in...' / 'We persist...' /\n"
+                "   'Recovery works by...' / 'We ensure idempotency by...'\n"
+                "   Do NOT force storage or persistence if the concept is purely computational.\n"
+                "\n"
+                "If TRADE-OFF or MECHANISM is missing -> REWRITE before returning.\n"
+                "FAILURE MODE missing is only a violation if the concept involves failure.\n"
+                "\n"
+                "BANNED phrases: 'worked reliably', 'ensured scalability',\n"
+                "'improved performance', 'robust system'\n"
+                "\n"
+                "Length: 300 tokens max.\n"
+            )
+        elif (
+            question_type == "CONCEPTUAL_BASIC"
             and self.question_depth == "practical"
         ):
             conceptual_instruction = (
@@ -970,8 +1191,69 @@ class InterviewOrchestrator:
                 "Keep it concise and grounded in real experience. "
                 "Stay within 300 tokens.\n"
             )
+        elif question_type == "CONCEPTUAL_BASIC":
+            conceptual_instruction = (
+                "CONCEPTUAL_BASIC: stay within 120 tokens.\n"
+                "Structure your answer in exactly this order:\n"
+                "1. DEFINITION: one clear sentence. No jargon unless you immediately explain it.\n"
+                "2. WHY IT MATTERS: one real-world consequence if ignored.\n"
+                "3. OPTIONAL EXAMPLE: a simple example.\n"
+                "   Prefer intuitive examples over production stories.\n"
+                "   Use your own system only if it clearly improves clarity.\n"
+                "Do NOT expand into tradeoffs, failure scenarios, or deep architecture.\n"
+                "Do NOT over-explain. Basic questions reward clarity, not volume.\n"
+                "Avoid turning this into a system design answer.\n"
+            )
         else:
             conceptual_instruction = "CONCEPTUAL_DEEP: stay within 300 tokens.\n"
+
+        if question_type == "BEHAVIORAL" and self.question_depth == "practical":
+            behavioral_instruction = (
+                "BEHAVIORAL (PRACTICAL): Name the specific project and your role "
+                "in sentence 1. State the problem or goal in one sentence.\n\n"
+                "Use the following rules to determine intent:\n"
+                "- If the question includes words like:\n"
+                "  'disagree', 'conflict', 'influence', 'convince', 'push back',\n"
+                "  'stakeholder', 'negotiate'\n"
+                "  → use FRICTION ARC\n"
+                "- If the question includes words like:\n"
+                "  'mistake', 'bug', 'failed', 'slow', 'performance', 'debug'\n"
+                "  → use TECHNICAL BEHAVIORAL\n"
+                "- If unclear, default to TECHNICAL BEHAVIORAL.\n\n"
+                "FRICTION ARC (for conflict/negotiation/influence questions):\n"
+                "- Focus on people, decisions, and communication\n"
+                "- Only include technical details if they directly support the conflict\n"
+                "- Do NOT turn this into a technical deep-dive\n"
+                "- If more than 50% of your answer is technical explanation, REWRITE\n"
+                "  to focus on decision and communication.\n"
+                "You MUST include ALL of the following:\n"
+                "1. FRICTION: explicitly state what the other party wanted and\n"
+                "   WHY they believed it was correct — based on their specific\n"
+                "   experience, constraints, or role (not generic concerns).\n"
+                "   You MUST include one concrete detail, such as years of\n"
+                "   experience, a specific operational constraint, or a real\n"
+                "   risk they were accountable for.\n"
+                "   Example: 'They had operated this system for 25 years and\n"
+                "   saw any protocol change as a stability risk to live trains.'\n"
+                "   Do NOT write: 'they were concerned about complexity.'\n"
+                "2. YOUR POSITION: what you believed and the concrete reason you pushed back\n"
+                "3. HOW YOU HANDLED IT: what you actually did or said to move things forward\n"
+                "4. RESULT: outcome — does NOT have to be a perfect win.\n"
+                "   A partial win or a compromise is more credible than always getting your way.\n"
+                "BANNED: 'they agreed', 'everyone was aligned', 'it went smoothly'\n\n"
+                "TECHNICAL BEHAVIORAL (for mistake/debug/ownership questions):\n"
+                "You MUST include ALL of the following:\n"
+                "1. TRADE-OFF: 'I chose X over Y because [specific technical reason]'\n"
+                "2. FAILURE or PROBLEM: what actually broke or was slow, and why\n"
+                "   Use concrete details: N+1 query, missing index, schema drift, etc.\n"
+                "   Do NOT say 'identified bottlenecks' — name the actual bottleneck.\n"
+                "3. MECHANISM: how you fixed it and how you verified the result\n"
+                "   e.g., 'replaced N+1 with batch query, verified via EXPLAIN plan'\n"
+                "If ANY missing → REWRITE before returning.\n"
+                "BANNED: 'worked reliably', 'ensured scalability', 'improved performance'\n"
+            )
+        else:
+            behavioral_instruction = ""
 
         return addon + (
             "SECTION 1 - ROLE & CONTEXT\n"
@@ -995,28 +1277,57 @@ class InterviewOrchestrator:
             "BEHAVIORAL: stay within 250 tokens.\n"
             "SYSTEM_DESIGN: stay within 500 tokens.\n"
             "[SYSTEM DESIGN STRUCTURE]\n"
-            "1. Start with a clear high-level approach.\n"
-            "2. Explain key components.\n"
-            "3. Mention trade-offs briefly.\n"
-            "4. Mention one failure scenario.\n"
-            "Do NOT ask the interviewer clarifying questions. "
-            "Proceed with reasonable assumptions. "
-            "Do NOT list assumptions as a separate section — embed them naturally. "
-            "Do NOT jump between sections or restart your answer midway.\n"
-            "FOLLOW_UP: Directly address the follow-up question. "
-            "Reference your previous answer if relevant. "
-            "Be more specific, not more general. Stay within 100 tokens.\n"
-        ) + conceptual_instruction + (
+            "You MUST incorporate at least one relevant element from your past systems\n"
+            "ONLY if it naturally applies to the problem.\n"
+            "Do NOT force unrelated experience.\n\n"
+            "1. Open with ONE SPECIFIC constraint that materially affects the design.\n"
+            "   The constraint must be realistic and grounded in the question context.\n"
+            "   Do NOT invent arbitrary numbers.\n"
+            "   Embed it naturally — do NOT label it as 'Assumption:'.\n\n"
+            "2. State your core architectural decision and WHY you chose it\n"
+            "   over the most obvious alternative.\n"
+            "   Use this pattern: 'I went with X instead of Y because at this scale, Y would...'\n\n"
+            "3. Walk through 2-3 key components. For each one, say why it exists\n"
+            "   and what you would lose if you removed it.\n\n"
+            "4. Name ONE thing you explicitly gave up in this design and why\n"
+            "   that tradeoff was acceptable given the constraints.\n\n"
+            "5. End with ONE realistic failure scenario tied to a concrete\n"
+            "   observability signal — not a generic 'this could fail' statement.\n"
+            "   Pattern: 'The risk I'd watch for is X — you'd see it as\n"
+            "   Y in your metrics/logs before it becomes an outage.'\n\n"
+            "Do NOT ask the interviewer clarifying questions.\n"
+            "Do NOT list assumptions as a separate section.\n"
+            "Do NOT use bullet points or headers in the output.\n"
+            "Stay within 500 tokens.\n"
+            f"FOLLOW_UP: Directly address the follow-up question. "
+            f"Reference your previous answer if relevant. "
+            f"Be more specific, not more general. "
+            f"Stay within {300 if depth > 0 else 100} tokens.\n"
+        ) + conceptual_instruction + behavioral_instruction + (
             "DEEP_DIVE: Tell the story of a real system you built.\n"
             "Structure: what it was → how it started → how it evolved → result.\n"
             "Include at least one specific metric or outcome.\n"
-            "Keep it conversational, 3-4 sentences minimum. Stay within 450 tokens.\n"
+            "Keep it conversational, 3-4 sentences minimum.\n"
+            "SELF-CHECK before returning:\n"
+            "- Does the answer contain 'worked reliably'? → REMOVE and replace\n"
+            "  with the specific reason (e.g., 'because Kafka gave us replay\n"
+            "  capability and backpressure handling')\n"
+            "- Does the answer contain 'ensured scalability' or\n"
+            "  'improved performance'? → REMOVE and replace with concrete metric\n"
+            "  or mechanism\n"
+            "- Is 'I chose X over Y because' present? If not → REWRITE\n"
+            "- Is a specific failure named? If not → REWRITE\n"
+            "Stay within 450 tokens.\n"
             "DEBUGGING_SCENARIO: stay within 280 tokens.\n"
-            "CODING: State your approach in one sentence first. "
-            "Mention time and space complexity. Call out one edge case. "
+            "CODING: Start with a brief approach in 1-2 sentences. "
+            "Then provide executable code that directly answers the problem. "
+            "After the code, briefly mention time complexity, space complexity, and one edge case. "
+            "Prefer complete solutions over high-level pseudocode. "
             "Stay within 900 tokens.\n"
-            "Never use markdown formatting: no bold, no bullet points, no emoji, and no numbered lists.\n"
-            "Answers must read as natural spoken English only.\n"
+            "For CODING only, code blocks are allowed. "
+            "For all other question types, never use markdown formatting: no bold, no bullet points, no emoji, and no numbered lists.\n"
+            "For CODING, use concise explanation plus code. "
+            "For all other question types, answers must read as natural spoken English only.\n"
         )
 
     def request_answer(
@@ -1054,6 +1365,7 @@ class InterviewOrchestrator:
     ) -> None:
         history = self.conversation_history
         has_image = bool(images_b64)
+        _is_follow = False
 
         # Step 1: Classification — lock to A-class type once session starts
         if self.phase_state is not None and self.phase_state.active:
@@ -1071,6 +1383,8 @@ class InterviewOrchestrator:
             question_type = self._classify_question(prompt, has_image)
 
         question_class = QUESTION_CLASS_MAP.get(question_type, "B")
+
+        is_new_question = False  # default; updated below if phase_state is active
 
         # New question detection: only run if phase_state exists
         # and current input looks like a new question
@@ -1092,6 +1406,7 @@ class InterviewOrchestrator:
             )
             is_slot_fill = bool(slot_fill_pattern.search(prompt))
             is_new_question = (
+                not _is_follow and  # follow-up exemption — must be first
                 not is_slot_fill
                 and (
                     # Signal 1: explicit question verb/keyword or ends with ?
@@ -1132,8 +1447,38 @@ class InterviewOrchestrator:
                 else:
                     self.phase_state = None
                 self.current_question_type = question_type
+                if question_type != "FOLLOW_UP":
+                    self.root_question_type = question_type
                 self.conversation_history = []
                 history = self.conversation_history
+
+        # Re-classify FOLLOW_UP if it introduces a new topic
+        if question_type == "FOLLOW_UP" and introduces_new_topic(prompt, self.topic_keywords):
+            question_type = self._classify_question(prompt, has_image)
+            question_class = QUESTION_CLASS_MAP.get(question_type, "B")
+            self.depth_state = 0
+            self.topic_keywords = set()
+            if question_type != "FOLLOW_UP":
+                self.root_question_type = question_type
+
+        # Depth state management — always runs for DEEP_DIVE context, independent of FSM
+        is_deep_dive_context = (
+            question_type == "DEEP_DIVE" or
+            (question_type == "FOLLOW_UP" and self.root_question_type == "DEEP_DIVE")
+        )
+
+        if is_deep_dive_context:
+            _is_follow = is_followup(prompt, self.phase_state, self.topic_keywords)
+            if _is_follow:
+                self._debug_log("followup_detected", prompt[:60])
+                self.depth_state = map_to_depth(prompt, self.depth_state)
+                self.depth_state = min(self.depth_state, MAX_DEPTH)
+            elif is_new_question:
+                self.depth_state = 0
+                self.topic_keywords = set()
+            # else: advance signal or short confirmation — leave depth unchanged
+        else:
+            _is_follow = False
 
         logger.info(
             "phase_state=%s question_class=%s",
@@ -1255,6 +1600,57 @@ class InterviewOrchestrator:
             self.phase_state = None
 
         self.current_question_type = question_type
+        if question_type != "FOLLOW_UP":
+            self.root_question_type = question_type
+        question = prompt.strip() or self.default_prompt
+
+        # --- Story bank routing ---
+        if question_type in ("DEEP_DIVE", "BEHAVIORAL"):
+            story = find_story(question)
+            if story:
+                self.current_story = story
+                # Inject story as context — do NOT bypass FSM
+                self._story_context = (
+                    "IMPORTANT: Base your answer ONLY on this system. "
+                    "Do NOT introduce a different project or company.\n\n"
+                    f"{get_summary(story)}\n\n"
+                    "Do NOT introduce unrelated systems or fabricated details.\n"
+                    "You MAY use standard distributed systems terminology where needed "
+                    "(e.g., at-least-once, exactly-once, idempotency, atomicity)."
+                )
+                # Extract topic keywords from story for follow-up detection
+                self.topic_keywords = set(story["tags"])
+                # Fall through to normal FSM pipeline — do NOT return
+            # No story match → fall through to normal pipeline
+
+        if question_type == "FOLLOW_UP":
+            if self.current_story:
+                snippet = None
+                if is_experience_followup(question):
+                    snippet = get_snippet(self.current_story, question)
+                if snippet:
+                    # Inject snippet as answer base — let LLM adapt angle to question
+                    self._snippet_context = snippet
+                    # Fall through to normal LLM pipeline
+                else:
+                    # Path B: LLM with story constraint
+                    story_reminder = (
+                        "\nIMPORTANT: Answer based ONLY on this system:\n"
+                        f"{get_summary(self.current_story)}\n"
+                        "HARD RULES:\n"
+                        "- You MUST use at least one concrete detail from "
+                        "this system in your answer\n"
+                        "- Do NOT mention any other company or project\n"
+                        "- Do NOT introduce details not present above\n"
+                        "- If asked why X over Y, answer using only the "
+                        "context of this system\n"
+                        "- Stay within this project's scope for the "
+                        "entire answer\n"
+                    )
+                    self._story_reminder = story_reminder
+            # Fall through to normal FOLLOW_UP pipeline
+        # --- End story bank routing ---
+
         system_message, _ = self.build_prompt(
             prompt=prompt,
             answer_mode=answer_mode,
@@ -1262,8 +1658,9 @@ class InterviewOrchestrator:
             phase_state=self.phase_state,
             skip_phase_rules=skip_phase_rules,
             fsm_enabled=fsm_enabled,
+            depth=self.depth_state,
+            root_question_type=self.root_question_type,
         )
-        question = prompt.strip() or self.default_prompt
         user_message = f"[CLASSIFIED AS: {question_type}]\nQuestion: {question}"
         groq_api_key = self.llm_client.config.groq_api_key
         groq_enabled = bool(groq_api_key)
@@ -1348,32 +1745,79 @@ class InterviewOrchestrator:
         phase_state: PhaseState | None = None,
         skip_phase_rules: bool = False,
         fsm_enabled: bool = False,
+        depth: int = 0,
+        root_question_type: str = OTHER_TYPE,
     ) -> tuple[str, str]:
         question_class = QUESTION_CLASS_MAP.get(question_type, "B")
-        print(
-            f"[BUILD] fsm_enabled={fsm_enabled} class={question_class} "
-            f"phase_state={phase_state} skip={skip_phase_rules}"
+        # Route by session semantics, not single-turn type.
+        # FOLLOW_UP inside a DEEP_DIVE session should use DEEP_DIVE prompt.
+        is_deep_dive_context = (
+            question_type == "DEEP_DIVE" or
+            (question_type == "FOLLOW_UP" and root_question_type == "DEEP_DIVE")
         )
+        effective_question_type = "DEEP_DIVE" if is_deep_dive_context else question_type
         logger.info("build_prompt: phase_state=%s skip=%s", phase_state, skip_phase_rules)
         question = prompt.strip() or self.default_prompt
         resume = self.resume_context or "No resume provided."
         base_system_message = self._system_prompt_template(
             answer_mode=answer_mode,
-            question_type=question_type,
+            question_type=effective_question_type,
+            depth=depth,
         ).format(resume=resume)
+        # --- Context card injection ---
+        cards = select_cards(question)
+        logger.debug("[context_cards] selected: %d card(s) for question: %s", len(cards), question[:60])
+        if cards:
+            card_block = "## Engineering Context (from my past projects)\n"
+            for card in cards:
+                card_block += f"- {card}\n"
+            base_system_message = card_block + "\n" + base_system_message
+        # --- End context card injection ---
         base_system_message += (
             "\n\n## Answer Style Guidance\n"
             f"{self.answer_style_prompt}"
         )
+        system_message = base_system_message
+
         if phase_state is not None and not skip_phase_rules:
             phase_block = self._build_phase_override_block(phase_state)
             if phase_block:
-                system_message = base_system_message + "\n\n" + phase_block
+                system_message += "\n\n" + phase_block
+
+        # story_reminder injection — must come before depth_block
+        story_reminder = getattr(self, '_story_reminder', None)
+        if story_reminder:
+            system_message += story_reminder
+            self._story_reminder = None  # consume after use
+
+        # story_context injection — must come before depth_block
+        story_context = getattr(self, '_story_context', None)
+        if story_context:
+            system_message += "\n\n" + story_context
+            self._story_context = None
+
+        snippet_context = getattr(self, '_snippet_context', None)
+        if snippet_context:
+            system_message += (
+                "\n\nANSWER BASE — USE THIS AS YOUR STARTING POINT:\n"
+                f"{snippet_context}\n\n"
+                "Adapt the phrasing and angle to match the exact question asked. "
+                "Keep the core facts and guarantee structure intact. "
+                "Do not change the guarantee declaration format: "
+                "'I guarantee X, but I do NOT guarantee Y.'"
+            )
+            self._snippet_context = None
+
+        # depth_block injection — always last, highest priority
+        if is_deep_dive_context:
+            if phase_state is not None and phase_state.phase == "PICK_CONTEXT":
+                depth_block = ""  # PICK_CONTEXT is info-gathering only, no content
+            elif phase_state is not None and phase_state.phase == "ARCH_OVERVIEW":
+                depth_block = build_depth_block(min(depth, 1))  # guarantee only
             else:
-                system_message = base_system_message
-        else:
-            system_message = base_system_message
-        print(f"[BUILD PROMPT TAIL] ...{system_message[-300:]!r}")
+                depth_block = build_depth_block(depth)
+            if depth_block:
+                system_message += "\n\n" + depth_block
         self._emit_context_log_once()
         user_message = f"Question: {question}"
         return system_message, user_message
